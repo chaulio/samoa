@@ -2433,102 +2433,104 @@ module SFC_edge_traversal
                     if (rank_MPI == 0) then
                         _log_write(0, '(4X, "load balancing: max imbalance < 0.1, do nothing")')
                     end if
-                    !l_early_exit = .true.
-                    !return !TODO: this should really return
+                    l_early_exit = .true.
                 end if
-               
-                if (rank_MPI == 0) then
-                        _log_write(0, '(4X, "Performing LB...")')
-                        _log_write(0, '(4X, "Before LB, load: ", I0, " ", I0, " ", I0)'), rank_load(0), rank_load(1), rank_load(2)
-                        _log_write(0, '(4X, "Before LB, TP: ", F20.10, " ", F20.10, " ", F20.10)'), r_all_throughputs(0), r_all_throughputs(1), r_all_throughputs(2)
-                    
-                    ! assign each section to a rank according to the relative sections' loads and the ranks' throuhputs
-                    ! first compute a relative position for each section (relative to total throughput)
-                    do i = 1, total_sections
-                        r_section_position(i) = (prefix_sum_load(i) - 0.5 * all_load(i)) * r_total_throughput / total_load
-                    end do
-                    
-                    ! now assign each section to a rank
-                    j = 0 ! rank
-                    do i = 1, total_sections ! i = section id
-                        do while (r_section_position(i) > r_all_throughputs(j)) !this is actually the prefix sum of throughputs
-                            j = j + 1
+                
+                if (l_early_exit .ne. .true.) then
+                
+                    if (rank_MPI == 0) then
+                            _log_write(0, '(4X, "Performing LB...")')
+                            _log_write(0, '(4X, "Before LB, load: ", I0, " ", I0, " ", I0)'), rank_load(0), rank_load(1), rank_load(2)
+                            _log_write(0, '(4X, "Before LB, TP: ", F20.10, " ", F20.10, " ", F20.10)'), r_all_throughputs(0), r_all_throughputs(1), r_all_throughputs(2)
+                        
+                        ! assign each section to a rank according to the relative sections' loads and the ranks' throuhputs
+                        ! first compute a relative position for each section (relative to total throughput)
+                        do i = 1, total_sections
+                            r_section_position(i) = (prefix_sum_load(i) - 0.5 * all_load(i)) * r_total_throughput / total_load
                         end do
                         
-                        all_ranks(i) = j
-                        
-                        assert_le(j, MPI_rank - 1)
-                    end do
+                        ! now assign each section to a rank
+                        j = 0 ! rank
+                        do i = 1, total_sections ! i = section id
+                            do while (r_section_position(i) > r_all_throughputs(j)) !this is actually the prefix sum of throughputs
+                                j = j + 1
+                            end do
+                            
+                            all_ranks(i) = j
+                            
+                            assert_le(j, MPI_rank - 1)
+                        end do
 
-                    all_sections(:) = 0
+                        all_sections(:) = 0
 
-                    do j = 1, total_sections
-                        i = all_ranks(j)
-                        all_sections(i) = all_sections(i) + 1
-                        all_section_indices_out(j) = all_sections(i)
-                    end do
-                end if
-                
-                !scatter new section count
+                        do j = 1, total_sections
+                            i = all_ranks(j)
+                            all_sections(i) = all_sections(i) + 1
+                            all_section_indices_out(j) = all_sections(i)
+                        end do
+                    end if
+                    
+                    !scatter new section count
 
-                call mpi_scatter(all_sections, 1, MPI_INTEGER, i_sections_in, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
-                
-                !scatter new ranks
+                    call mpi_scatter(all_sections, 1, MPI_INTEGER, i_sections_in, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
+                    
+                    !scatter new ranks
 
-                !allocate space for variables that are stored per input section
-                if (.not. associated(i_rank_in) .or. size(i_rank_in) .ne. i_sections_in) then
-                    if (associated(i_rank_in)) then
-                        deallocate(i_rank_in, stat = i_error); assert_eq(i_error, 0)
-                        deallocate(requests_in, stat=i_error); assert_eq(i_error, 0)
+                    !allocate space for variables that are stored per input section
+                    if (.not. associated(i_rank_in) .or. size(i_rank_in) .ne. i_sections_in) then
+                        if (associated(i_rank_in)) then
+                            deallocate(i_rank_in, stat = i_error); assert_eq(i_error, 0)
+                            deallocate(requests_in, stat=i_error); assert_eq(i_error, 0)
+                        end if
+
+                        allocate(i_rank_in(i_sections_in), stat=i_error); assert_eq(i_error, 0)
+                        allocate(requests_in(i_sections_in), stat=i_error); assert_eq(i_error, 0)
                     end if
 
-                    allocate(i_rank_in(i_sections_in), stat=i_error); assert_eq(i_error, 0)
-                    allocate(requests_in(i_sections_in), stat=i_error); assert_eq(i_error, 0)
-                end if
+                    !allocate space for variables that are stored per output section
+                    if (.not. associated(i_rank_out) .or. size(i_rank_out) .ne. i_sections_out) then
+                        if (associated(i_rank_out)) then
+                            deallocate(i_rank_out, stat = i_error); assert_eq(i_error, 0)
+                            deallocate(i_section_index_out, stat = i_error); assert_eq(i_error, 0)
+                            deallocate(requests_out, stat = i_error); assert_eq(i_error, 0)
+                        end if
 
-                !allocate space for variables that are stored per output section
-                if (.not. associated(i_rank_out) .or. size(i_rank_out) .ne. i_sections_out) then
-                    if (associated(i_rank_out)) then
-                        deallocate(i_rank_out, stat = i_error); assert_eq(i_error, 0)
-                        deallocate(i_section_index_out, stat = i_error); assert_eq(i_error, 0)
-                        deallocate(requests_out, stat = i_error); assert_eq(i_error, 0)
+                        allocate(i_rank_out(i_sections_out), stat=i_error); assert_eq(i_error, 0)
+                        allocate(i_section_index_out(i_sections_out), stat=i_error); assert_eq(i_error, 0)
+                        allocate(requests_out(i_sections_out), stat=i_error); assert_eq(i_error, 0)
                     end if
 
-                    allocate(i_rank_out(i_sections_out), stat=i_error); assert_eq(i_error, 0)
-                    allocate(i_section_index_out(i_sections_out), stat=i_error); assert_eq(i_error, 0)
-                    allocate(requests_out(i_sections_out), stat=i_error); assert_eq(i_error, 0)
+                    if (rank_MPI == 0) then
+
+                        all_sections(0 : size_MPI - 2) = displacements(1 : size_MPI - 1) - displacements(0 : size_MPI - 2)
+                        all_sections(size_MPI - 1) = total_sections - displacements(size_MPI - 1)
+                    end if
+
+                    call mpi_scatterv(all_ranks, all_sections, displacements, MPI_INTEGER, i_rank_out, i_sections_out, MPI_INTEGER, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
+                    call mpi_scatterv(all_section_indices_out, all_sections, displacements, MPI_INTEGER, i_section_index_out, i_sections_out, MPI_INTEGER, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
+
+                    deallocate(local_load, stat=i_error); assert_eq(i_error, 0)
+                    deallocate(all_load, stat=i_error); assert_eq(i_error, 0)
+                    deallocate(all_sections, stat=i_error); assert_eq(i_error, 0)
+                    deallocate(displacements, stat=i_error); assert_eq(i_error, 0)
+                    deallocate(all_ranks, stat=i_error); assert_eq(i_error, 0)
+                    deallocate(all_section_indices_out, stat=i_error); assert_eq(i_error, 0)
+                    deallocate(r_all_throughputs, stat=i_error); assert_eq(i_error, 0)
+                    deallocate(rank_load, stat=i_error); assert_eq(i_error, 0)
+
+                    do j = 1, i_sections_in
+                        call mpi_irecv(i_rank_in(j), 1, MPI_INTEGER, MPI_ANY_SOURCE, j, MPI_COMM_WORLD, requests_in(j), i_error); assert_eq(i_error, 0)
+                    end do
+
+                    do j = 1, i_sections_out
+                        call mpi_isend(rank_MPI, 1, MPI_INTEGER, i_rank_out(j), i_section_index_out(j), MPI_COMM_WORLD, requests_out(j), i_error); assert_eq(i_error, 0)
+                    end do
+
+                    call mpi_waitall(i_sections_in, requests_in, MPI_STATUSES_IGNORE, i_error); assert_eq(i_error, 0)
+                    call mpi_waitall(i_sections_out, requests_out, MPI_STATUSES_IGNORE, i_error); assert_eq(i_error, 0)
                 end if
 
-                if (rank_MPI == 0) then
-
-                    all_sections(0 : size_MPI - 2) = displacements(1 : size_MPI - 1) - displacements(0 : size_MPI - 2)
-                    all_sections(size_MPI - 1) = total_sections - displacements(size_MPI - 1)
-                end if
-
-                call mpi_scatterv(all_ranks, all_sections, displacements, MPI_INTEGER, i_rank_out, i_sections_out, MPI_INTEGER, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
-                call mpi_scatterv(all_section_indices_out, all_sections, displacements, MPI_INTEGER, i_section_index_out, i_sections_out, MPI_INTEGER, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
-
-                deallocate(local_load, stat=i_error); assert_eq(i_error, 0)
-                deallocate(all_load, stat=i_error); assert_eq(i_error, 0)
-                deallocate(all_sections, stat=i_error); assert_eq(i_error, 0)
-                deallocate(displacements, stat=i_error); assert_eq(i_error, 0)
-                deallocate(all_ranks, stat=i_error); assert_eq(i_error, 0)
-                deallocate(all_section_indices_out, stat=i_error); assert_eq(i_error, 0)
-                deallocate(r_all_throughputs, stat=i_error); assert_eq(i_error, 0)
-                deallocate(rank_load, stat=i_error); assert_eq(i_error, 0)
-
-                do j = 1, i_sections_in
-                    call mpi_irecv(i_rank_in(j), 1, MPI_INTEGER, MPI_ANY_SOURCE, j, MPI_COMM_WORLD, requests_in(j), i_error); assert_eq(i_error, 0)
-                end do
-
-                do j = 1, i_sections_out
-                    call mpi_isend(rank_MPI, 1, MPI_INTEGER, i_rank_out(j), i_section_index_out(j), MPI_COMM_WORLD, requests_out(j), i_error); assert_eq(i_error, 0)
-                end do
-
-                call mpi_waitall(i_sections_in, requests_in, MPI_STATUSES_IGNORE, i_error); assert_eq(i_error, 0)
-                call mpi_waitall(i_sections_out, requests_out, MPI_STATUSES_IGNORE, i_error); assert_eq(i_error, 0)
-
-            !$omp end single
+            !$omp end single copyprivate(l_early_exit)
 
             !pass private copies of the array pointers back to caller function
             i_rank_out_local => i_rank_out
