@@ -904,10 +904,14 @@ module Grid
     subroutine grid_clear_stats(grid)
         class(t_grid)           :: grid
         integer :: i
+        double precision :: r_last_step_computation_time
 
         if (associated(grid%threads%elements)) then
             do i = 1, size(grid%threads%elements)
+                ! do not clear r_last_step_computation_time
+                r_last_step_computation_time = grid%threads%elements(i)%stats%r_last_step_computation_time
                 call grid%threads%elements(i)%stats%clear()
+                grid%threads%elements(i)%stats%r_last_step_computation_time = r_last_step_computation_time
             end do
         end if
 
