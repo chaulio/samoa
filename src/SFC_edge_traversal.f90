@@ -2319,10 +2319,10 @@ module SFC_edge_traversal
             double precision :: r_computation_time ! computation time for this rank (max among all threads)
             double precision :: r_throughput ! throughput for this rank = load/r_computation_time
             double precision :: r_total_throughput ! sum of all ranks' throughputs
-            double precision, allocatable, save :: r_all_throughputs(:) ! throughputs of each rank
-            double precision, allocatable, save :: r_section_position(:) ! proportional position of section
-            integer, allocatable, save :: rank_load(:) ! total load of each rank
-            integer (kind = GRID_DI), allocatable, save :: prefix_sum_load(:)
+            double precision, allocatable :: r_all_throughputs(:) ! throughputs of each rank
+            double precision, allocatable :: r_section_position(:) ! proportional position of section
+            integer, allocatable :: rank_load(:) ! total load of each rank
+            integer (kind = GRID_DI), allocatable :: prefix_sum_load(:)
             integer :: total_load, my_load
             double precision :: rank_imbalance ! used for deciding whether load balancy will be perfomed. A value of zero would mean a perfectly balanced rank (with respect to its output)
 
@@ -2407,7 +2407,8 @@ module SFC_edge_traversal
                 if (i_sections_out > 0) then
                     ! the computation below is the same as: rank_imbalance = (load/r_throughput)/(total_load/r_total_throughput)
                     ! but with only one division.
-                    rank_imbalance = (local_load(rank_MPI)*r_total_throughput)/(total_load*r_throughput)
+                    rank_imbalance = (my_load*r_total_throughput)/(total_load*r_throughput)
+                    
 
                     if (rank_imbalance < 1) then ! avoid negative values
                         if (rank_imbalance == 0) then ! avoid division by zero
@@ -2423,10 +2424,16 @@ module SFC_edge_traversal
 
                 call reduce(rank_imbalance, MPI_MAX)
                 
+                if (rank_MPI == 0) then
+                    _log_write(0, '(4X, "Max imbalance: ", F20.10)'), rank_imbalance
+                end if
+                
                 !exit early if the imbalance is not big enough
                 if (rank_imbalance .le. 0.1) then
+                    if (rank_MPI == 0) then
                         _log_write(0, '(4X, "load balancing: max imbalance < 0.1, do nothing")')
-                    l_early_exit = .true.
+                    end if
+                    !l_early_exit = .true.
                     !return !TODO: this should really return
                 end if
                
@@ -2462,17 +2469,10 @@ module SFC_edge_traversal
                     end do
                 end if
                 
-                    !local_load=0
-                    !do i=1,size_MPI
-                        
-                    !end do
-                    !_log_write(0, '(4X, "Before LB, load: ", I0, " ", I0, " ", I0)'), all_load(1), all_load(2), all_load(3)
-                       
-
                 !scatter new section count
 
                 call mpi_scatter(all_sections, 1, MPI_INTEGER, i_sections_in, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
-
+                
                 !scatter new ranks
 
                 !allocate space for variables that are stored per input section
@@ -2514,6 +2514,8 @@ module SFC_edge_traversal
                 deallocate(displacements, stat=i_error); assert_eq(i_error, 0)
                 deallocate(all_ranks, stat=i_error); assert_eq(i_error, 0)
                 deallocate(all_section_indices_out, stat=i_error); assert_eq(i_error, 0)
+                deallocate(r_all_throughputs, stat=i_error); assert_eq(i_error, 0)
+                deallocate(rank_load, stat=i_error); assert_eq(i_error, 0)
 
                 do j = 1, i_sections_in
                     call mpi_irecv(i_rank_in(j), 1, MPI_INTEGER, MPI_ANY_SOURCE, j, MPI_COMM_WORLD, requests_in(j), i_error); assert_eq(i_error, 0)
@@ -2525,6 +2527,7 @@ module SFC_edge_traversal
 
                 call mpi_waitall(i_sections_in, requests_in, MPI_STATUSES_IGNORE, i_error); assert_eq(i_error, 0)
                 call mpi_waitall(i_sections_out, requests_out, MPI_STATUSES_IGNORE, i_error); assert_eq(i_error, 0)
+
             !$omp end single
 
             !pass private copies of the array pointers back to caller function
