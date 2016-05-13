@@ -1353,11 +1353,18 @@ module SFC_edge_traversal
 	        _log_write(2, '(4X, "load balancing: imbalance above threshold? yes: ", F0.3, " > ", F0.3)') dble(i_max_load) * size_MPI / dble(i_total_load) - 1.0d0, r_max_imbalance
 
             if (cfg%l_serial_lb) then
-                call compute_partition_serial(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
+				if (cfg%l_lb_hh) then
+					call compute_partition_serial_heterogeneous(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
+				else
+					call compute_partition_serial(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
+				endif
             else
-                !call compute_partition_distributed(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
-                call compute_partition_serial_heterogeneous(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
-            end if
+				if (cfg%l_lb_hh) then
+					call compute_partition_distributed_heterogeneous(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
+				else
+					call compute_partition_distributed(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
+				endif            
+			end if
 
             if (l_early_exit) then
                 return
@@ -2332,7 +2339,7 @@ module SFC_edge_traversal
                 i_steps_since_last_lb = i_steps_since_last_lb + 1
             !$omp end single
             
-            if (mod(i_steps_since_last_lb,5) .ne. 0) then
+            if (mod(i_steps_since_last_lb, cfg%i_lb_hh_frequency) .ne. 0) then
                 if (rank_mpi == 0) then
                     !$omp single
                         _log_write(2, '(4X, "Skipping LB...")')
@@ -2432,9 +2439,9 @@ module SFC_edge_traversal
                 end if
                 
                 !exit early if the imbalance is not big enough
-                if (max_imbalance .le. 0.1) then
+                if (max_imbalance .le. cfg%r_lb_hh_threshold) then
                     if (rank_MPI == 0) then
-                        _log_write(0, '(4X, "load balancing: max imbalance < 0.1, do nothing")')
+                        _log_write(0, '(4X, "load balancing: max imbalance < ", F0.3, ", do nothing")') cfg%r_lb_hh_threshold
                     end if
                     l_early_exit = .true.
                 end if
