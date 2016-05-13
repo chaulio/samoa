@@ -220,15 +220,14 @@
 				!set numerics and check for refinement
 				call swe%init%traverse(grid)
 
-                if (rank_MPI == 0) then
-                    grid_info%i_cells = grid%get_cells(MPI_SUM, .false.)
+                grid_info%i_cells = grid%get_cells(MPI_SUM, .true.)
 
+                if (rank_MPI == 0) then
                     !$omp master
                     _log_write(1, "(A, I0, A, I0, A)") " SWE: ", i_initial_step, " adaptions, ", grid_info%i_cells, " cells"
                     !$omp end master
                 end if
 
-                grid_info%i_cells = grid%get_cells(MPI_SUM, .true.)
 				if (swe%init%i_refinements_issued .le. grid_info%i_cells / 100_GRID_DI) then
 					exit
 				endif
@@ -303,9 +302,9 @@
                     !displace time-dependent bathymetry
                     call swe%displace%traverse(grid)
 
-                    if (rank_MPI == 0) then
-                        grid_info%i_cells = grid%get_cells(MPI_SUM, .false.)
+                    grid_info%i_cells = grid%get_cells(MPI_SUM, .true.)
 
+                    if (rank_MPI == 0) then
                         !$omp master
                         _log_write(1, '(A, I0, A, ES14.7, A, ES14.7, A, I0)') " SWE: EQ time step: ", i_time_step, ", sim. time:", grid%r_time, " s, dt:", grid%r_dt, " s, cells: ", grid_info%i_cells
                         !$omp end master
@@ -354,9 +353,9 @@
 				call swe%euler%traverse(grid)
 				i_time_step = i_time_step + 1
 
+				grid_info%i_cells = grid%get_cells(MPI_SUM, .true.)
+				
                 if (rank_MPI == 0) then
-                    grid_info%i_cells = grid%get_cells(MPI_SUM, .false.)
-
                     !$omp master
                     _log_write(1, '(A, I0, A, ES14.7, A, ES14.7, A, I0)') " SWE: time step: ", i_time_step, ", sim. time:", grid%r_time, " s, dt:", grid%r_dt, " s, cells: ", grid_info%i_cells
                     !$omp end master
