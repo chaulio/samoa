@@ -2324,7 +2324,7 @@ module SFC_edge_traversal
             integer (kind = GRID_DI), allocatable :: rank_load(:) ! total load of each rank
             integer (kind = GRID_DI), allocatable :: prefix_sum_load(:)
             integer (kind = GRID_DI) :: total_load, my_load
-            double precision :: rank_imbalance ! used for deciding whether load balancy will be perfomed. A value of zero would mean a perfectly balanced rank (with respect to its output)
+            double precision :: max_imbalance ! used for deciding whether load balancing will be perfomed. A value of zero would mean a perfectly balanced rank (with respect to its output)
 
             l_early_exit = .false.
 
@@ -2332,7 +2332,7 @@ module SFC_edge_traversal
                 i_steps_since_last_lb = i_steps_since_last_lb + 1
             !$omp end single
             
-            if (mod(i_steps_since_last_lb,10) .ne. 0) then
+            if (mod(i_steps_since_last_lb,5) .ne. 0) then
                 if (rank_mpi == 0) then
                     !$omp single
                         _log_write(2, '(4X, "Skipping LB...")')
@@ -2344,8 +2344,6 @@ module SFC_edge_traversal
             
             !$omp single
             
-                !gather section indices
-
                 if (rank_MPI == 0) then
                     allocate(all_sections(0 : size_MPI - 1), stat=i_error); assert_eq(i_error, 0)
                     allocate(displacements(0 : size_MPI - 1), stat=i_error); assert_eq(i_error, 0)
@@ -2358,8 +2356,33 @@ module SFC_edge_traversal
                     allocate(rank_load(0), stat=i_error); assert_eq(i_error, 0)
                 end if
 
+                !gather section indices
                 i_sections_out = grid%sections%get_size()
                 call mpi_gather(i_sections_out, 1, MPI_INTEGER, all_sections, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
+                
+                ! gather load and throughput from all ranks
+                my_load = sum(grid%sections%elements_alloc(:)%load)
+                call mpi_gather(my_load, 1, MPI_INTEGER8, rank_load, 1, MPI_INTEGER8, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
+                !compute throughput based on time for the last steps (from the average thread)
+                my_computation_time = sum(grid%threads%elements(:)%stats%r_last_step_computation_time) / size(grid%threads%elements(:))
+                ! reset timers for next step 
+                grid%threads%elements(:)%stats%r_last_step_computation_time = 0
+                my_throughput = my_load / max(my_computation_time, 1.0e-5) ! avoid division by zero
+                call mpi_gather(my_throughput, 1, MPI_DOUBLE, rank_throughput, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
+                
+                ! if one rank has no load, consider all throughputs to be equal, so the load is evenly distributed
+                if (minval(rank_load) == 0) then
+					rank_throughput = 1.0
+                end if
+
+                ! apply prefix sum to rank_throughput and compute total_throughput
+                if (rank_MPI == 0) then
+                    call prefix_sum(rank_throughput, rank_throughput)
+                    total_throughput = rank_throughput(size_MPI - 1)
+                    total_load = sum(rank_load)
+                endif
+                
+                call MPI_bcast(total_load, 1, MPI_INTEGER8, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
          
                 !gather load
                 if (rank_MPI == 0) then
@@ -2381,55 +2404,35 @@ module SFC_edge_traversal
                 allocate(local_load(i_sections_out), stat=i_error); assert_eq(i_error, 0)
 
                 local_load(:) = grid%sections%elements_alloc(:)%load
-                my_load = max(1, sum(local_load))
                 call mpi_gatherv(local_load, i_sections_out, MPI_INTEGER8, all_load, all_sections, displacements, MPI_INTEGER8, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
-                call mpi_gather(my_load, 1, MPI_INTEGER8, rank_load, 1, MPI_INTEGER8, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
-
-               
-                !compute throughput based on time for the last steps (from the average thread)
-                my_computation_time = sum(grid%threads%elements(:)%stats%r_last_step_computation_time) / size(grid%threads%elements(:))
-                ! reset timers for next step 
-                grid%threads%elements(:)%stats%r_last_step_computation_time = 0
-                my_throughput = my_load / max(my_computation_time, 1.0e-5) ! avoid division by zero
-                !_log_write(0, '(4X, "My_tp: ", F20.10)'), my_throughput
-
-                
-                call mpi_gather(my_throughput, 1, MPI_DOUBLE, rank_throughput, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
-
-                if (rank_MPI == 0) then
-                    call prefix_sum(rank_throughput, rank_throughput)
-                    total_throughput = rank_throughput(size_MPI - 1)
-                    call prefix_sum(prefix_sum_load, all_load)
-                    total_load = sum(all_load)
-                endif
                 
                 ! check if imbalance is high enough
-                if (i_sections_out > 0) then
-                    ! the computation below is the same as: rank_imbalance = (my_load/my_throughput)/(total_load/total_throughput)
+                if (my_load > 0) then
+                    ! the computation below is the same as: max_imbalance = (my_load/my_throughput)/(total_load/total_throughput)
                     ! but with only one division.
-                    rank_imbalance = (my_load*total_throughput)/(total_load*my_throughput)
+                    max_imbalance = (my_load*total_throughput)/(total_load*my_throughput)
                     
 
-                    if (rank_imbalance < 1) then ! avoid negative values
-                        if (rank_imbalance == 0) then ! avoid division by zero
-                            rank_imbalance = 1.0 
+                    if (max_imbalance < 1) then ! avoid negative values
+                        if (max_imbalance == 0) then ! avoid division by zero
+                            max_imbalance = 1.0 
                         else
-                            rank_imbalance = 1.0 / rank_imbalance
+                            max_imbalance = 1.0 / max_imbalance
                         end if
                     end if
-                    rank_imbalance = rank_imbalance - 1 ! 0 = perfectly balanced
+                    max_imbalance = max_imbalance - 1 ! 0 = perfectly balanced
                 else
-                    rank_imbalance = 1 ! if this rank is empty, it is not balanced
+                    max_imbalance = 1 ! if this rank is empty, it is not balanced
                 end if
 
-                call reduce(rank_imbalance, MPI_MAX)
+                call reduce(max_imbalance, MPI_MAX)
                 
                 if (rank_MPI == 0) then
-                    _log_write(0, '(4X, "Max imbalance: ", F20.10)'), rank_imbalance
+                    _log_write(0, '(4X, "Max imbalance: ", F20.10)'), max_imbalance
                 end if
                 
                 !exit early if the imbalance is not big enough
-                if (rank_imbalance .le. 0.1) then
+                if (max_imbalance .le. 0.1) then
                     if (rank_MPI == 0) then
                         _log_write(0, '(4X, "load balancing: max imbalance < 0.1, do nothing")')
                     end if
@@ -2445,6 +2448,7 @@ module SFC_edge_traversal
                         
                         ! assign each section to a rank according to the relative sections' loads and the ranks' throuhputs
                         ! first compute a relative position for each section (relative to total throughput)
+                        call prefix_sum(prefix_sum_load, all_load)
                         do i = 1, total_sections
                             section_position(i) = (prefix_sum_load(i) - 0.5 * all_load(i)) * total_throughput / total_load
                         end do
@@ -2471,7 +2475,7 @@ module SFC_edge_traversal
                             
                             rank_load(i) = rank_load(i) + all_load(j)
                         end do
-                        _log_write(0, '(4X, "Before LB, load: ", I0, " ", I0, " ", I0)'), rank_load(0), rank_load(1), rank_load(2)
+                        _log_write(0, '(4X, "After LB, load: ", I0, " ", I0, " ", I0)'), rank_load(0), rank_load(1), rank_load(2)
                     end if
                     
                     !scatter new section count
