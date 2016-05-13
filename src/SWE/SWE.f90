@@ -408,6 +408,7 @@
  			type(t_grid), intent(inout)     :: grid
 
  			double precision, save          :: t_phase = huge(1.0d0)
+ 			double precision, save			:: t_total = 0
 
 			!$omp master
                 !Initially, just start the timer and don't print anything
@@ -419,6 +420,8 @@
                     call swe%euler%reduce_stats(MPI_SUM, .true.)
                     call swe%adaption%reduce_stats(MPI_SUM, .true.)
                     call grid%reduce_stats(MPI_SUM, .true.)
+                    
+                    t_total = t_total + t_phase
 
                     if (rank_MPI == 0) then
                         _log_write(0, *) ""
@@ -445,6 +448,7 @@
 #						endif
                         _log_write(0, '(A, T34, F12.4, A)') " Asagi time:", grid%stats%r_asagi_time, " s"
                         _log_write(0, '(A, T34, F12.4, A)') " Phase time:", t_phase, " s"
+                        _log_write(0, '(A, T34, F12.4, A)') " Total time:", t_total, " s"
                         _log_write(0, *) ""
                     end if
                 end if
