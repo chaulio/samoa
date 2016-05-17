@@ -2404,6 +2404,8 @@ module SFC_edge_traversal
                     allocate(all_section_indices_out(total_sections), stat=i_error); assert_eq(i_error, 0)
                 else
                     allocate(all_load(0), stat=i_error); assert_eq(i_error, 0)
+                    allocate(prefix_sum_load(0), stat=i_error); assert_eq(i_error, 0)
+                    allocate(section_position(0), stat=i_error); assert_eq(i_error, 0)
                     allocate(all_ranks(0), stat=i_error); assert_eq(i_error, 0)
                     allocate(all_section_indices_out(0), stat=i_error); assert_eq(i_error, 0)
                 end if
@@ -2447,7 +2449,6 @@ module SFC_edge_traversal
                 end if
                 
                 if (l_early_exit .ne. .true.) then
-                
                     if (rank_MPI == 0) then
                             _log_write(0, '(4X, "Performing LB...")')
                             _log_write(0, '(4X, "Before LB, load: ", I0, " ", I0, " ", I0)'), rank_load(0), rank_load(1), rank_load(2)
@@ -2524,17 +2525,6 @@ module SFC_edge_traversal
                     call mpi_scatterv(all_ranks, all_sections, displacements, MPI_INTEGER, i_rank_out, i_sections_out, MPI_INTEGER, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
                     call mpi_scatterv(all_section_indices_out, all_sections, displacements, MPI_INTEGER, i_section_index_out, i_sections_out, MPI_INTEGER, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
 
-                    deallocate(local_load, stat=i_error); assert_eq(i_error, 0)
-                    deallocate(all_load, stat=i_error); assert_eq(i_error, 0)
-                    deallocate(all_sections, stat=i_error); assert_eq(i_error, 0)
-                    deallocate(displacements, stat=i_error); assert_eq(i_error, 0)
-                    deallocate(all_ranks, stat=i_error); assert_eq(i_error, 0)
-                    deallocate(all_section_indices_out, stat=i_error); assert_eq(i_error, 0)
-                    deallocate(rank_throughput, stat=i_error); assert_eq(i_error, 0)
-                    deallocate(rank_load, stat=i_error); assert_eq(i_error, 0)
-                    deallocate(prefix_sum_load, stat=i_error); assert_eq(i_error, 0)
-                    deallocate(section_position, stat=i_error); assert_eq(i_error, 0)
-                    
                     do j = 1, i_sections_in
                         call mpi_irecv(i_rank_in(j), 1, MPI_INTEGER, MPI_ANY_SOURCE, j, MPI_COMM_WORLD, requests_in(j), i_error); assert_eq(i_error, 0)
                     end do
@@ -2546,9 +2536,20 @@ module SFC_edge_traversal
                     call mpi_waitall(i_sections_in, requests_in, MPI_STATUSES_IGNORE, i_error); assert_eq(i_error, 0)
                     call mpi_waitall(i_sections_out, requests_out, MPI_STATUSES_IGNORE, i_error); assert_eq(i_error, 0)
                 end if
+                
+                deallocate(local_load, stat=i_error); assert_eq(i_error, 0)
+                deallocate(all_load, stat=i_error); assert_eq(i_error, 0)
+                deallocate(all_sections, stat=i_error); assert_eq(i_error, 0)
+                deallocate(displacements, stat=i_error); assert_eq(i_error, 0)
+                deallocate(all_ranks, stat=i_error); assert_eq(i_error, 0)
+                deallocate(all_section_indices_out, stat=i_error); assert_eq(i_error, 0)
+                deallocate(rank_throughput, stat=i_error); assert_eq(i_error, 0)
+                deallocate(rank_load, stat=i_error); assert_eq(i_error, 0)
+                deallocate(prefix_sum_load, stat=i_error); assert_eq(i_error, 0)
+                deallocate(section_position, stat=i_error); assert_eq(i_error, 0)
 
             !$omp end single copyprivate(l_early_exit)
-
+            
             !pass private copies of the array pointers back to caller function
             i_rank_out_local => i_rank_out
             i_section_index_out_local => i_section_index_out
