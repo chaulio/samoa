@@ -1511,9 +1511,9 @@ module SFC_edge_traversal
 
                         if (comm%neighbor_rank .ge. 0 .and. comm%neighbor_rank .ne. rank_MPI) then
                             do i_edge = 1, comm%i_edges
-                                update%flux(:) = comm%p_local_edges(i_edge)%update%flux(:)
+                                update = comm%p_local_edges(i_edge)%update
                                 rep = transfer(update, rep)
-                                comm%p_neighbor_edges(i_edge)%rep%Q(:) = rep%Q(:)
+                                comm%p_neighbor_edges(i_edge)%rep = rep
                             end do
                         end if
                     end do
@@ -1536,9 +1536,18 @@ module SFC_edge_traversal
 
                         if (comm%neighbor_rank .ge. 0) then
                             do i_edge = 1, comm%i_edges
-                                rep%Q(:) = comm%p_neighbor_edges(i_edge)%rep%Q(:)
+                                rep = comm%p_neighbor_edges(i_edge)%rep
                                 update = transfer(rep, update)
+                                ! the line below should be enough, but it leads to a weird compilation error on the intel compiler -> why??
+                                !comm%p_local_edges(i_edge)%update = update
+                                ! since it doesn't work, we need to copy it like this:
                                 comm%p_local_edges(i_edge)%update%flux(:) = update%flux(:)
+#                               if defined(_SWE_PATCH)
+                                    comm%p_local_edges(i_edge)%update%H(:) = update%H(:)
+                                    comm%p_local_edges(i_edge)%update%HU(:) = update%HU(:)
+                                    comm%p_local_edges(i_edge)%update%HV(:) = update%HV(:)
+                                    comm%p_local_edges(i_edge)%update%B(:) = update%B(:)
+#                               endif
                             end do
                         end if
                     end do
