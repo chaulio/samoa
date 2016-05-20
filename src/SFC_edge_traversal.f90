@@ -2332,13 +2332,14 @@ module SFC_edge_traversal
             integer (kind = GRID_DI), allocatable, save     :: all_load(:), local_load(:)
             integer                                         :: total_sections, i_sections_out, i_sections_in, i_error, i, j, k
             
-            double precision :: my_computation_time ! computation time for this rank (max among all threads)
+            double precision :: my_computation_time ! computation time since last LB for this rank (avg among all threads)
             double precision :: my_throughput ! throughput for this rank = load/my_computation_time
             double precision :: total_throughput ! sum of all ranks' throughputs
             double precision, allocatable :: rank_throughput(:) ! throughputs of each rank
             double precision, allocatable :: section_position(:) ! proportional position of section
             integer (kind = GRID_DI), allocatable :: rank_load(:) ! total load of each rank
             integer (kind = GRID_DI), allocatable :: prefix_sum_load(:)
+            integer (kind = GRID_DI), save        :: my_accumulated_load = 0 ! total load processed by this rank since last LB -> in a dynamic grid, my_load may change between timesteps
             integer (kind = GRID_DI) :: total_load, my_load
             double precision :: max_imbalance ! used for deciding whether load balancing will be perfomed. A value of zero would mean a perfectly balanced rank (with respect to its output)
 
@@ -2346,7 +2347,9 @@ module SFC_edge_traversal
 
             !$omp single
                 i_steps_since_last_lb = i_steps_since_last_lb + 1
-            !$omp end single
+                my_load = sum(grid%sections%elements_alloc(:)%load)
+                my_accumulated_load = my_accumulated_load + my_load
+            !$omp end single copyprivate(my_load, my_accumulated_load)
             
             if (mod(i_steps_since_last_lb, cfg%i_lb_hh_frequency) .ne. 0) then
                 if (rank_mpi == 0) then
@@ -2377,14 +2380,15 @@ module SFC_edge_traversal
                 call mpi_gather(i_sections_out, 1, MPI_INTEGER, all_sections, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
                 
                 ! gather load and throughput from all ranks
-                my_load = sum(grid%sections%elements_alloc(:)%load)
                 call mpi_gather(my_load, 1, MPI_INTEGER8, rank_load, 1, MPI_INTEGER8, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
                 !compute throughput based on time for the last steps (from the average thread)
                 my_computation_time = sum(grid%threads%elements(:)%stats%r_last_step_computation_time) / size(grid%threads%elements(:))
-                ! reset timers for next step 
-                grid%threads%elements(:)%stats%r_last_step_computation_time = 0
-                my_throughput = my_load / max(my_computation_time, 1.0e-5) ! avoid division by zero
+                my_throughput = my_accumulated_load / max(my_computation_time, 1.0e-5) ! avoid division by zero
                 call mpi_gather(my_throughput, 1, MPI_DOUBLE, rank_throughput, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
+
+                ! reset timers and counters for next step 
+                grid%threads%elements(:)%stats%r_last_step_computation_time = 0
+                my_accumulated_load = 0
                 
                 ! if one rank has no load, consider all throughputs to be equal, so the load is evenly distributed
                 if (minval(rank_load) == 0) then
