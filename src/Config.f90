@@ -40,7 +40,8 @@ module config
         logical                                 :: l_split_sections                                 !< if true, MPI load balancing may split sections, if false sections are treated as atomic units
         logical                                 :: l_serial_lb                                      !< if true, MPI load balancing is serialized, if false a distributed algorithm is used
         ! load balancing for heterogeneous hardware (HH):
-        logical                                 :: l_lb_hh 		                                    !< if true, MPI load balancing considers the performance of each rank and distributes load accordingly
+        logical                                 :: l_lb_hh 		                                    !< if true, MPI load balancing can distribute the load unevenly
+        logical                                 :: l_lb_hh_auto                                     !< if true, MPI load balancing considers the performance of each rank and distributes load accordingly
         integer                                 :: i_lb_hh_frequency                                !< load balancing frequency: it will be applied every X steps
         double precision						:: r_lb_hh_threshold								!< if imbalance < threshold, load balancing is skipped
         
@@ -103,7 +104,7 @@ module config
 
         write(arguments, '(A)') "-v .false. --version .false. -h .false. --help .false."
         write(arguments, '(A, A)') trim(arguments),   " -lbtime .false. -lbsplit .false. -lbserial .false. -lbcellweight 1.0d0 -lbbndweight 0.0d0"
-        write(arguments, '(A, A)') trim(arguments),   " -lbhh .false. -lbhhfreq 5 -lbhhthreshold 0.1"
+        write(arguments, '(A, A)') trim(arguments),   " -lbhh .false. -lbhhfreq 5 -lbhhthreshold 0.1 -lbhhauto .true."
         write(arguments, '(A, A)') trim(arguments),  " -asagihints 2 -phases 1 -asciioutput_width 60 -asciioutput .false. -xmloutput .false. -stestpoints '' -noprint .false. -sections 4"
         write(arguments, '(A, A, I0)') trim(arguments), " -threads ", omp_get_max_threads()
 
@@ -147,6 +148,7 @@ module config
         config%l_split_sections = lget('samoa_lbsplit')
         config%l_serial_lb = lget('samoa_lbserial')
         config%l_lb_hh = lget('samoa_lbhh')
+        config%l_lb_hh_auto = lget('samoa_lbhhauto')
         config%i_lb_hh_frequency = iget('samoa_lbhhfreq')
         config%r_lb_hh_threshold = rget('samoa_lbhhthreshold')
         config%i_sections_per_thread = iget('samoa_sections')
@@ -204,7 +206,8 @@ module config
                 PRINT '(A, L, A)',      "	-lbtime                 if true, load is estimated by time measurements, if false load is estimated by cell count (value: ", config%l_timed_load, ")"
                 PRINT '(A, L, A)',      "	-lbsplit                if true, MPI load balancing may split sections, if false sections are treated as atomic units (value: ", config%l_split_sections, ")"
                 PRINT '(A, L, A)',      "	-lbserial               if true, MPI load balancing is serialized, if false a distributed algorithm is used (value: ", config%l_serial_lb, ")"
-                PRINT '(A, L, A)',      "	-lbhh               	if true, MPI load balancing considers the performance of each rank and distributes load accordingly (value: ", config%l_lb_hh, ")"
+                PRINT '(A, L, A)',      "	-lbhh               	if true, MPI load balancing can distribute the loa unevenly (value: ", config%l_lb_hh, ")"
+                PRINT '(A, L, A)',      "   -lbhhauto               if true, MPI load balancing considers the performance of each rank and distributes load accordingly (value: ", config%l_lb_hh_auto, ")"
                 PRINT '(A, I0, A)',      "	-lbhhfreq               load balancing frequency: it will be applied every X steps (value: ", config%i_lb_hh_frequency, ")"
                 PRINT '(A, F0.3, A)',   "	-lbhhthreshold       	if imbalance < threshold, load balancing is skipped (value: ", config%r_lb_hh_threshold, ")"
                 PRINT '(A, F0.3, A)',  "	-lbcellweight           cell weight for the count-based load estimate (value: ", config%r_cell_weight, ")"

@@ -1832,7 +1832,7 @@ module SFC_edge_traversal
                 i_steps_since_last_lb = i_steps_since_last_lb + 1
             !$omp end single
             
-            if (mod(i_steps_since_last_lb,10) .ne. 0) then
+            if (mod(i_steps_since_last_lb,cfg%i_lb_hh_frequency) .ne. 0) then
                 if (rank_mpi == 0) then
                     !$omp single
                         _log_write(0, '(4X, "Skipping LB...")')
@@ -1922,7 +1922,7 @@ module SFC_edge_traversal
 
             
             !exit early if the imbalance is not big enough
-            if (rank_imbalance .le. 0.1) then
+            if (rank_imbalance .le. cfg%r_lb_hh_threshold) then
                 !$omp single
                     _log_write(0, '(4X, "load balancing: max imbalance < 0.1, do nothing")')
                 !$omp end single
@@ -2384,6 +2384,16 @@ module SFC_edge_traversal
                 !compute throughput based on time for the last steps (from the average thread)
                 my_computation_time = sum(grid%threads%elements(:)%stats%r_last_step_computation_time) / size(grid%threads%elements(:))
                 my_throughput = my_accumulated_load / max(my_computation_time, 1.0e-5) ! avoid division by zero
+                
+                ! if cfg%l_lb_hh_auto is not set, then use this 50-25-25 distribution
+                if (cfg%l_lb_hh_auto == .false.) then
+                    if (mod(rank_MPI,3) == 0) then 
+                        my_throughput = 50
+                    else
+                        my_throughput = 25
+                    end if
+                endif
+                
                 call mpi_gather(my_throughput, 1, MPI_DOUBLE, rank_throughput, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
 
                 ! reset timers and counters for next step 
@@ -2391,7 +2401,7 @@ module SFC_edge_traversal
                 my_accumulated_load = 0
                 
                 ! if one rank has no load, consider all throughputs to be equal, so the load is evenly distributed
-                if (minval(rank_load) == 0) then
+                if (cfg%l_lb_hh_auto .and. minval(rank_load) == 0) then
 					rank_throughput = 1.0
                 end if
 
@@ -2464,7 +2474,10 @@ module SFC_edge_traversal
                 if (l_early_exit .ne. .true.) then
                     if (rank_MPI == 0) then
                             _log_write(0, '(4X, "Performing LB...")')
-                            _log_write(0, '(4X, "Before LB, load: ", I0, " ", I0, " ", I0)'), rank_load(0), rank_load(1), rank_load(2)
+                            ! integer/total load :
+                            !_log_write(0, '(4X, "Before LB, load: ", I0, " ", I0, " ", I0)'), rank_load(0), rank_load(1), rank_load(2)
+                            ! real/percentage:
+                            _log_write(0, '(4X, "Before LB, load: ", F10.7, " ", F10.7, " ", F10.7)'), dble(rank_load(0))/total_load, dble(rank_load(1))/total_load, dble(rank_load(2))/total_load
                             !_log_write(0, '(4X, "Before LB, TP: ", F20.10, " ", F20.10, " ", F20.10)'), rank_throughput(0), rank_throughput(1), rank_throughput(2)
                         
                         ! assign each section to a rank according to the relative sections' loads and the ranks' throuhputs
