@@ -2342,6 +2342,7 @@ module SFC_edge_traversal
             integer (kind = GRID_DI), save        :: my_accumulated_load = 0 ! total load processed by this rank since last LB -> in a dynamic grid, my_load may change between timesteps
             integer (kind = GRID_DI) :: total_load, my_load
             double precision :: max_imbalance ! used for deciding whether load balancing will be perfomed. A value of zero would mean a perfectly balanced rank (with respect to its output)
+            integer :: status(MPI_STATUS_SIZE)
 
             l_early_exit = .false.
 
@@ -2393,7 +2394,7 @@ module SFC_edge_traversal
                         my_throughput = 25
                     end if
                 endif
-                
+
                 call mpi_gather(my_throughput, 1, MPI_DOUBLE, rank_throughput, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
 
                 ! reset timers and counters for next step 
@@ -2412,8 +2413,18 @@ module SFC_edge_traversal
                     total_load = sum(rank_load)
                 endif
                 
-                call MPI_bcast(total_load, 1, MPI_INTEGER8, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
-         
+                !call MPI_bcast(total_load, 1, MPI_INTEGER8, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
+                ! MPI_bcast is not working properly on SuperMUC nodes, so I am using the "manual" broadcasting below:
+                if (rank_MPI == 0) then
+                    ! 0 sends to all others
+                    do i = 1, size_MPI - 1
+                        call MPI_Send(total_load, 1, MPI_INTEGER8, i, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
+                    end do
+                else
+                    ! all others receive from 0
+                    call MPI_Recv(total_load, 1, MPI_INTEGER8, 0, 0, MPI_COMM_WORLD, status, i_error); assert_eq(i_error, 0)
+                end if
+                         
                 !gather load
                 if (rank_MPI == 0) then
                     call prefix_sum(displacements, all_sections)
@@ -2509,7 +2520,8 @@ module SFC_edge_traversal
                             
                             rank_load(i) = rank_load(i) + all_load(j)
                         end do
-                        _log_write(0, '(4X, "After LB, load: ", I0, " ", I0, " ", I0)'), rank_load(0), rank_load(1), rank_load(2)
+                        !_log_write(0, '(4X, "After LB, load: ", I0, " ", I0, " ", I0)'), rank_load(0), rank_load(1), rank_load(2)
+                        _log_write(0, '(4X, "After LB, load: ", F10.7, " ", F10.7, " ", F10.7)'), dble(rank_load(0))/total_load, dble(rank_load(1))/total_load, dble(rank_load(2))/total_load
                     end if
                     
                     !scatter new section count

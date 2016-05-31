@@ -104,7 +104,7 @@ module config
 
         write(arguments, '(A)') "-v .false. --version .false. -h .false. --help .false."
         write(arguments, '(A, A)') trim(arguments),   " -lbtime .false. -lbsplit .false. -lbserial .false. -lbcellweight 1.0d0 -lbbndweight 0.0d0"
-        write(arguments, '(A, A)') trim(arguments),   " -lbhh .false. -lbhhfreq 5 -lbhhthreshold 0.1 -lbhhauto .true."
+        write(arguments, '(A, A)') trim(arguments),   " -lbhh .false. -lbhhfreq 5 -lbhhthreshold 0.1 -lbhhauto .false. "
         write(arguments, '(A, A)') trim(arguments),  " -asagihints 2 -phases 1 -asciioutput_width 60 -asciioutput .false. -xmloutput .false. -stestpoints '' -noprint .false. -sections 4"
         write(arguments, '(A, A, I0)') trim(arguments), " -threads ", omp_get_max_threads()
 
@@ -339,7 +339,7 @@ module config
         _log_write(0, '(" Adaptivity: min depth: ", I0, ", max depth: ", I0)') config%i_min_depth, config%i_max_depth
 
         _log_write(0, '(" Load balancing: timed load estimate: ", A, ", split sections: ", A, ", serial: ", A)') logical_to_char(config%l_timed_load), logical_to_char(config%l_split_sections), logical_to_char(config%l_serial_lb)
-        _log_write(0, '(" Load balancing: for heterogenous hardware (HH): ", A, ", frequency: ", I0, ", threshold: ", F0.3)') logical_to_char(config%l_lb_hh), config%i_lb_hh_frequency, config%r_lb_hh_threshold
+        _log_write(0, '(" Load balancing: for heterogenous hardware (HH): ", A, ", frequency: ", I0, ", threshold: ", F0.3, ", auto: ", A)') logical_to_char(config%l_lb_hh), config%i_lb_hh_frequency, config%r_lb_hh_threshold, logical_to_char(config%l_lb_hh_auto)
         _log_write(0, '(" Load balancing: cell weight: ", F0.2, ", boundary weight: ", F0.2)') config%r_cell_weight, config%r_boundary_weight
 
         _log_write(0, '(" Scenario: max time steps: ", I0, ", max time: ", ES9.2, ", output step: ", ES9.2)') config%i_max_time_steps, config%r_max_time, config%r_output_time_step
