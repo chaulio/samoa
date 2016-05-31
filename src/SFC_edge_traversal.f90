@@ -1352,20 +1352,35 @@ module SFC_edge_traversal
 
 	        _log_write(2, '(4X, "load balancing: imbalance above threshold? yes: ", F0.3, " > ", F0.3)') dble(i_max_load) * size_MPI / dble(i_total_load) - 1.0d0, r_max_imbalance
 
-            if (cfg%l_serial_lb) then
-				if (cfg%l_lb_hh) then
-					call compute_partition_serial_heterogeneous(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
-				else
-					call compute_partition_serial(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
-				endif
-            else
-				if (cfg%l_lb_hh) then
-					call compute_partition_distributed_heterogeneous(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
-				else
-					call compute_partition_distributed(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
-				endif            
-			end if
+	        !$omp single
+                i_steps_since_last_lb = i_steps_since_last_lb + 1
+            !$omp end single
 
+            ! check if LB should be performed now
+            if (mod(i_steps_since_last_lb, cfg%i_lb_frequency) .eq. 0) then
+                if (rank_MPI == 0) then
+                    !$omp single
+                    _log_write(1, '(4X, "Performing LB...")')
+                    !$omp end single
+                end if
+                
+                if (cfg%l_serial_lb) then
+                    if (cfg%l_lb_hh) then
+                        call compute_partition_serial_heterogeneous(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
+                    else
+                        call compute_partition_serial(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
+                    endif
+                else
+                    if (cfg%l_lb_hh) then
+                        call compute_partition_distributed_heterogeneous(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
+                    else
+                        call compute_partition_distributed(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
+                    endif            
+                end if
+            else
+                l_early_exit = .true.
+            end if
+            
             if (l_early_exit) then
                 return
             end if
@@ -1574,7 +1589,7 @@ module SFC_edge_traversal
 
 	        l_early_exit = .false.
         	call grid%get_local_sections(i_first_local_section, i_last_local_section)
-
+        	
             !$omp single
 			!switch to integer arithmetics from now on, we need exact arithmetics
 			!also we do not allow empty loads (thus l <- max(1, l)), because the mapping from process to load must be invertible
@@ -1827,20 +1842,6 @@ module SFC_edge_traversal
         double precision :: rank_imbalance ! used for deciding whether load balancy will be perfomed. A value of zero would mean a perfectly balanced rank (with respect to its output)
 
             l_early_exit = .false.
-            
-            !$omp single
-                i_steps_since_last_lb = i_steps_since_last_lb + 1
-            !$omp end single
-            
-            if (mod(i_steps_since_last_lb,cfg%i_lb_hh_frequency) .ne. 0) then
-                if (rank_mpi == 0) then
-                    !$omp single
-                        _log_write(0, '(4X, "Skipping LB...")')
-                    !$omp end single
-                end if
-                l_early_exit = .true.
-                return
-            end if
             
             call grid%get_local_sections(i_first_local_section, i_last_local_section)
 
@@ -2196,8 +2197,6 @@ module SFC_edge_traversal
             integer (kind = GRID_DI), allocatable, save     :: all_load(:), local_load(:)
             integer                                         :: total_sections, i_sections_out, i_sections_in, i_error, i, j, k
 
-			l_early_exit = .false.
-
             !$omp single
 
             !gather section indices
@@ -2347,22 +2346,6 @@ module SFC_edge_traversal
             l_early_exit = .false.
 
             !$omp single
-                i_steps_since_last_lb = i_steps_since_last_lb + 1
-                my_load = sum(grid%sections%elements_alloc(:)%load)
-                my_accumulated_load = my_accumulated_load + my_load
-            !$omp end single copyprivate(my_load, my_accumulated_load)
-            
-            if (mod(i_steps_since_last_lb, cfg%i_lb_hh_frequency) .ne. 0) then
-                if (rank_mpi == 0) then
-                    !$omp single
-                        _log_write(2, '(4X, "Skipping LB...")')
-                    !$omp end single
-                end if
-                l_early_exit = .true.
-                return
-            end if
-            
-            !$omp single
             
                 if (rank_MPI == 0) then
                     allocate(all_sections(0 : size_MPI - 1), stat=i_error); assert_eq(i_error, 0)
@@ -2381,9 +2364,11 @@ module SFC_edge_traversal
                 call mpi_gather(i_sections_out, 1, MPI_INTEGER, all_sections, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
                 
                 ! gather load and throughput from all ranks
+                my_load = sum(grid%sections%elements_alloc(:)%load)
                 call mpi_gather(my_load, 1, MPI_INTEGER8, rank_load, 1, MPI_INTEGER8, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
                 !compute throughput based on time for the last steps (from the average thread)
                 my_computation_time = sum(grid%threads%elements(:)%stats%r_last_step_computation_time) / size(grid%threads%elements(:))
+                my_accumulated_load = my_accumulated_load + my_load
                 my_throughput = my_accumulated_load / max(my_computation_time, 1.0e-5) ! avoid division by zero
                 
                 ! if cfg%l_lb_hh_auto is not set, then use this 50-25-25 distribution
