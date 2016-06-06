@@ -1320,6 +1320,8 @@ module SFC_edge_traversal
         type(t_grid)						            :: grid_temp
         integer	(BYTE)  		                        :: i_color
         logical                                         :: l_early_exit
+        double precision                                :: my_throughput
+        integer (kind = GRID_DI)                        :: my_load
 
 #		if defined(_MPI)
             _log_write(3, '(3X, A)') "distribute load"
@@ -1360,24 +1362,33 @@ module SFC_edge_traversal
             if (mod(i_steps_since_last_lb, cfg%i_lb_frequency) .eq. 0) then
                 if (rank_MPI == 0) then
                     !$omp single
-                    _log_write(1, '(4X, "Performing LB...")')
+                    _log_write(1, '(4X, "Time for LB...")')
                     !$omp end single
                 end if
                 
-                if (cfg%l_serial_lb) then
-                    if (cfg%l_lb_hh) then
-                        call compute_partition_serial_heterogeneous(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
+                if (cfg%l_lb_hh) then
+                    call compute_load_and_throughput(grid, my_load, my_throughput)
+                    !$omp single
+                        _log_write(1, '(4X, "My load, my throughput, ratio: ", I0, F20.5, F20.5)') my_load, my_throughput, my_load/my_throughput
+                    !$omp end single
+                    
+                    !call compute_max_imbalance(my_throughput)
+                    
+                    if (cfg%l_serial_lb) then
+                        call compute_partition_serial_heterogeneous(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit, my_throughput, my_load)
                     else
-                        call compute_partition_serial(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
-                    endif
+                        call compute_partition_distributed_heterogeneous(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit, my_throughput, my_load)
+                    end if
                 else
-                    if (cfg%l_lb_hh) then
-                        call compute_partition_distributed_heterogeneous(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
+                    if (cfg%l_serial_lb) then
+                        call compute_partition_serial(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
                     else
                         call compute_partition_distributed(grid, i_rank_out, i_section_index_out, i_rank_in, l_early_exit)
-                    endif            
+                    end if
                 end if
+                
             else
+                !do not perform any LB now!
                 l_early_exit = .true.
             end if
             
@@ -1508,6 +1519,59 @@ module SFC_edge_traversal
 
 	        !$omp barrier
 #		endif
+    end subroutine
+    
+    subroutine compute_load_and_throughput(grid, my_load, my_throughput)
+        type(t_grid), intent(inout)   :: grid
+        integer (kind = GRID_DI), intent(inout) :: my_load
+        double precision, intent(out) :: my_throughput
+        
+        integer :: min_load
+        double precision :: my_computation_time
+        
+        my_load = sum(grid%sections%elements_alloc(:)%load)
+
+       !compute throughput based on time for the last steps (from the average thread)
+        !my_computation_time = sum(grid%threads%elements(:)%stats%r_last_step_computation_time) / size(grid%threads%elements(:))
+        !my_accumulated_load = my_accumulated_load + my_load !TODO: this is not working anymore!
+        !my_throughput = my_accumulated_load / max(my_computation_time, 1.0e-5) ! avoid division by zero
+            
+        ! if cfg%l_lb_hh_auto is not set, then use this 50-25-25 distribution
+        if (cfg%l_lb_hh_auto == .false.) then
+            if (mod(rank_MPI,3) == 0) then 
+                my_throughput = 50
+            else
+                my_throughput = 25
+            end if
+            return
+        endif
+
+        
+        ! if at least one rank has zero load, distribute the load evenly so that it is possible to compute 
+        ! the throughput for every rank at the next iteration
+        
+        !$omp single
+        min_load = my_load
+        call reduce(min_load, MPI_MIN)
+        !$omp end single copyprivate(min_load)
+
+        if (min_load == 0) then
+            my_throughput = 1
+            return
+        end if
+      
+        
+        ! now we need to actually compute the throughput
+        
+        ! compute throughput based on time for the last steps (from the average thread)
+        my_computation_time = sum(grid%threads%elements(:)%stats%r_last_step_computation_time) / size(grid%threads%elements(:))
+        !$omp single
+            _log_write(0, '(4X, "time: ", F20.5)'), my_computation_time
+        !$omp end single
+        my_throughput = my_load / max(my_computation_time, 1.0e-5) ! avoid division by zero
+
+
+        
     end subroutine
 
 #	if defined(_MPI)
@@ -1819,10 +1883,12 @@ module SFC_edge_traversal
 
         !> for heterogeneous hardware: uses a distributed algorithm to compute the new partition based on the relative throughput of each rank
         !> this approach scales well, but requires local methods and cannot achieve optimal load balance
-        subroutine compute_partition_distributed_heterogeneous(grid, i_rank_out_local, i_section_index_out_local, i_rank_in_local, l_early_exit)
-		    type(t_grid), intent(inout)		                :: grid
-		    integer, pointer, intent(inout)                 :: i_rank_out_local(:), i_section_index_out_local(:), i_rank_in_local(:)
-		    logical, intent(out)                            :: l_early_exit
+        subroutine compute_partition_distributed_heterogeneous(grid, i_rank_out_local, i_section_index_out_local, i_rank_in_local, l_early_exit, my_throughput, my_load)
+            type(t_grid), intent(inout)		                :: grid
+            integer, pointer, intent(inout)                 :: i_rank_out_local(:), i_section_index_out_local(:), i_rank_in_local(:)
+            logical, intent(out)                            :: l_early_exit
+            double precision, intent(inout)                 :: my_throughput ! throughput for this rank
+            integer (kind = GRID_DI), intent(inout)         :: my_load
 
 		integer, pointer, save                          :: i_rank_out(:) => null(), i_section_index_out(:) => null(), i_rank_in(:) => null()
 		integer, allocatable, save                      :: i_sections_out(:), i_sections_in(:), i_partial_sections_in(:), i_partial_sections_out(:), i_delta_out(:), requests_out(:, :), requests_in(:)
@@ -1831,11 +1897,10 @@ module SFC_edge_traversal
 		type(t_grid_section), pointer					:: section
 		integer						                    :: i_error, i_sections, requests(2)
 		integer	(BYTE)  		                        :: i_color
-		integer (kind = GRID_DI)					    :: load, partial_load, total_load
+		integer (kind = GRID_DI)					    :: partial_load, total_load
 		character (len=100)                             :: msg
 
         double precision :: r_computation_time ! computation time for this rank (max among all threads)
-        double precision :: r_throughput ! throughput for this rank = load/r_computation_time
         double precision :: r_total_throughput ! sum of all ranks' throughputs
         double precision :: r_partial_throughput ! prefix sum of throughputs on ranks
         double precision :: r_section_position ! proportional position of section 
@@ -1849,10 +1914,9 @@ module SFC_edge_traversal
                 !switch to integer arithmetics from now on, we need exact arithmetics
                 !also we do not allow empty loads (thus l <- max(1, l)), because the mapping from process to load must be invertible
 
-                load = max(1_GRID_DI, grid%load)
-                        partial_load = load
+                partial_load = my_load
                 call prefix_sum(partial_load, MPI_SUM)
-                total_load = load
+                total_load = my_load
                 call reduce(total_load, MPI_SUM)
 
     !#if defined(NEW_LB)
@@ -1862,21 +1926,21 @@ module SFC_edge_traversal
                 grid%threads%elements(:)%stats%r_last_step_computation_time = 0
                 
                 
-                r_throughput = load / max(r_computation_time, 1.0e-5) ! avoid division by zero
-                r_partial_throughput = r_throughput
+                my_throughput = my_load / max(r_computation_time, 1.0e-5) ! avoid division by zero
+                r_partial_throughput = my_throughput
                 call prefix_sum(r_partial_throughput, MPI_SUM)
-                r_total_throughput = r_throughput
+                r_total_throughput = my_throughput
                 call reduce(r_total_throughput, MPI_SUM)
 
     !#endif
-                assert_gt(load, 0)
+                assert_gt(my_load, 0)
                 assert_gt(total_load, 0)
                 i_sections = grid%sections%get_size()
 
                 if (i_sections > 0) then
-                    ! the computation below is the same as: rank_imbalance = (load/r_throughput)/(total_load/r_total_throughput)
+                    ! the computation below is the same as: rank_imbalance = (load/my_throughput)/(total_load/r_total_throughput)
                     ! but with only one division.
-                    rank_imbalance = (load*r_total_throughput)/(total_load*r_throughput)
+                    rank_imbalance = (my_load*r_total_throughput)/(total_load*my_throughput)
 
                     if (rank_imbalance < 1) then ! avoid negative values
                         if (rank_imbalance == 0) then ! avoid division by zero
@@ -1895,8 +1959,8 @@ module SFC_edge_traversal
                 ! print some numbers to understand what is happening. This should be provisory (TODO)
                 _log_write(0, '(4X, "Computation_time: ", F20.10, F20.10)') r_computation_time, maxval(grid%threads%elements(:)%stats%r_computation_time)
                 if (rank_MPI == 1) then
-                    _log_write(0, '(4X, "Load on each rank:, ", I0, " ", I0, " ", I0, " (", I0, ")")') partial_load-load, load, total_load-partial_load, total_load
-                    _log_write(0, '(4X, "TP on each rank:, ", F10.2, " ", F10.2, " ", F10.2, " (", F10.2, ")")') r_partial_throughput-r_throughput, r_throughput, r_total_throughput-r_partial_throughput, r_total_throughput
+                    _log_write(0, '(4X, "Load on each rank:, ", I0, " ", I0, " ", I0, " (", I0, ")")') partial_load-my_load, my_load, total_load-partial_load, total_load
+                    _log_write(0, '(4X, "TP on each rank:, ", F10.2, " ", F10.2, " ", F10.2, " (", F10.2, ")")') r_partial_throughput-my_throughput, my_throughput, r_total_throughput-r_partial_throughput, r_total_throughput
                     _log_write(0, '(4X, "Max imbalance: ", F5.3)') rank_imbalance
                 end if
 
@@ -1919,7 +1983,7 @@ module SFC_edge_traversal
                     allocate(requests_in(0), stat=i_error, errmsg=msg); if (i_error .ne. 0) then; print *, msg; end if; assert_eq(i_error, 0)
                 end if
 
-            !$omp end single copyprivate(rank_imbalance, i_sections, load, partial_load, total_load, r_throughput, r_partial_throughput, r_total_throughput)
+            !$omp end single copyprivate(rank_imbalance, i_sections, my_load, partial_load, total_load, my_throughput, r_partial_throughput, r_total_throughput)
 
             
             !exit early if the imbalance is not big enough
@@ -1978,9 +2042,9 @@ module SFC_edge_traversal
                 !assign this section to its respective ideal rank
 
                 ! relative position according to throughput and load distribution (between 0 and r_total_throughput)
-                r_section_position = ((partial_load-load+section%partial_load) - 0.5*section%load) * r_total_throughput / total_load
+                r_section_position = ((partial_load-my_load+section%partial_load) - 0.5*section%load) * r_total_throughput / total_load
 
-                if (r_section_position <= r_partial_throughput - r_throughput) then ! send section to previous rank
+                if (r_section_position <= r_partial_throughput - my_throughput) then ! send section to previous rank
                     i_rank = max(0, rank_MPI - 1)
                 elseif (r_section_position > r_partial_throughput) then ! send section to next rank
                     i_rank = min(size_MPI - 1, rank_MPI + 1)
@@ -2320,10 +2384,12 @@ module SFC_edge_traversal
 
         !> for heterogeneous hardware: uses a serial algorithm to compute the new partition based on each rank's performance
         !> this serial approach scales badly, but can apply global methods and can achieve optimal load balance
-        subroutine compute_partition_serial_heterogeneous(grid, i_rank_out_local, i_section_index_out_local, i_rank_in_local, l_early_exit)
+        subroutine compute_partition_serial_heterogeneous(grid, i_rank_out_local, i_section_index_out_local, i_rank_in_local, l_early_exit, my_throughput, my_load)
             type(t_grid), intent(inout)                     :: grid
             integer, pointer, intent(inout)                 :: i_rank_out_local(:), i_section_index_out_local(:), i_rank_in_local(:)
             logical, intent(out)                            :: l_early_exit
+            double precision, intent(inout)                 :: my_throughput 
+            integer (kind = GRID_DI), intent(inout)         :: my_load
 
             integer, pointer, save                          :: i_rank_out(:) => null(), i_section_index_out(:) => null(), i_rank_in(:) => null()
             integer, allocatable, save                      :: all_sections(:), displacements(:), all_ranks(:), all_section_indices_out(:)
@@ -2332,14 +2398,13 @@ module SFC_edge_traversal
             integer                                         :: total_sections, i_sections_out, i_sections_in, i_error, i, j, k
             
             double precision :: my_computation_time ! computation time since last LB for this rank (avg among all threads)
-            double precision :: my_throughput ! throughput for this rank = load/my_computation_time
             double precision :: total_throughput ! sum of all ranks' throughputs
             double precision, allocatable :: rank_throughput(:) ! throughputs of each rank
             double precision, allocatable :: section_position(:) ! proportional position of section
             integer (kind = GRID_DI), allocatable :: rank_load(:) ! total load of each rank
             integer (kind = GRID_DI), allocatable :: prefix_sum_load(:)
             integer (kind = GRID_DI), save        :: my_accumulated_load = 0 ! total load processed by this rank since last LB -> in a dynamic grid, my_load may change between timesteps
-            integer (kind = GRID_DI) :: total_load, my_load
+            integer (kind = GRID_DI) :: total_load
             double precision :: max_imbalance ! used for deciding whether load balancing will be perfomed. A value of zero would mean a perfectly balanced rank (with respect to its output)
             integer :: status(MPI_STATUS_SIZE)
 
@@ -2364,33 +2429,13 @@ module SFC_edge_traversal
                 call mpi_gather(i_sections_out, 1, MPI_INTEGER, all_sections, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
                 
                 ! gather load and throughput from all ranks
-                my_load = sum(grid%sections%elements_alloc(:)%load)
                 call mpi_gather(my_load, 1, MPI_INTEGER8, rank_load, 1, MPI_INTEGER8, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
-                !compute throughput based on time for the last steps (from the average thread)
-                my_computation_time = sum(grid%threads%elements(:)%stats%r_last_step_computation_time) / size(grid%threads%elements(:))
-                my_accumulated_load = my_accumulated_load + my_load
-                my_throughput = my_accumulated_load / max(my_computation_time, 1.0e-5) ! avoid division by zero
-                
-                ! if cfg%l_lb_hh_auto is not set, then use this 50-25-25 distribution
-                if (cfg%l_lb_hh_auto == .false.) then
-                    if (mod(rank_MPI,3) == 0) then 
-                        my_throughput = 50
-                    else
-                        my_throughput = 25
-                    end if
-                endif
-
                 call mpi_gather(my_throughput, 1, MPI_DOUBLE, rank_throughput, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
 
                 ! reset timers and counters for next step 
                 grid%threads%elements(:)%stats%r_last_step_computation_time = 0
                 my_accumulated_load = 0
                 
-                ! if one rank has no load, consider all throughputs to be equal, so the load is evenly distributed
-                if (cfg%l_lb_hh_auto .and. minval(rank_load) == 0) then
-					rank_throughput = 1.0
-                end if
-
                 ! apply prefix sum to rank_throughput and compute total_throughput
                 if (rank_MPI == 0) then
                     call prefix_sum(rank_throughput, rank_throughput)
@@ -2464,7 +2509,7 @@ module SFC_edge_traversal
                     if (rank_MPI == 0) then
                         _log_write(0, '(4X, "load balancing: max imbalance < ", F0.3, ", do nothing")') cfg%r_lb_hh_threshold
                     end if
-                    l_early_exit = .true.
+                    !l_early_exit = .true.
                 end if
                 
                 if (l_early_exit .ne. .true.) then
@@ -2474,7 +2519,7 @@ module SFC_edge_traversal
                             !_log_write(0, '(4X, "Before LB, load: ", I0, " ", I0, " ", I0)'), rank_load(0), rank_load(1), rank_load(2)
                             ! real/percentage:
                             _log_write(0, '(4X, "Before LB, load: ", F10.7, " ", F10.7, " ", F10.7)'), dble(rank_load(0))/total_load, dble(rank_load(1))/total_load, dble(rank_load(2))/total_load
-                            !_log_write(0, '(4X, "Before LB, TP: ", F20.10, " ", F20.10, " ", F20.10)'), rank_throughput(0), rank_throughput(1), rank_throughput(2)
+                            _log_write(0, '(4X, "Before LB, TP: ", F20.10, " ", F20.10, " ", F20.10)'), rank_throughput(0), rank_throughput(1), rank_throughput(2)
                         
                         ! assign each section to a rank according to the relative sections' loads and the ranks' throuhputs
                         ! first compute a relative position for each section (relative to total throughput)
