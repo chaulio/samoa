@@ -86,7 +86,7 @@ module Tools_mpi
                 call mpi_finalized(mpi_is_finalized, i_error); assert_eq(i_error, 0)
 
                 if (.not. mpi_is_finalized) then
-                    call mpi_barrier(MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
+                    !call mpi_barrier(MPI_COMM_WORLD, i_error); assert_eq(i_error, 0)
                     call mpi_finalize(i_error); assert_eq(i_error, 0)
                 end if
             end if

@@ -34,6 +34,9 @@ MODULE SFC_data_types
 
     implicit none
 
+    double precision :: time_test = 0
+    public time_test
+    
 	!constants
 
     enum, bind(c)

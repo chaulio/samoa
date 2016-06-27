@@ -296,10 +296,8 @@ subroutine traverse(traversal, grid)
             assert_eq(i_section, grid%sections%elements_alloc(i_section)%index)
 
             traversal%children(i_section)%stats%r_computation_time = -get_wtime()
-            traversal%children(i_section)%stats%r_last_step_computation_time = -get_wtime()
             call boundary_skeleton(traversal%children(i_section), grid%sections%elements_alloc(i_section))
             traversal%children(i_section)%stats%r_computation_time = traversal%children(i_section)%stats%r_computation_time + get_wtime()
-            traversal%children(i_section)%stats%r_last_step_computation_time = traversal%children(i_section)%stats%r_last_step_computation_time + get_wtime()
         end do
 #   endif
 
@@ -324,7 +322,6 @@ subroutine traverse(traversal, grid)
 
 #       if defined(_GT_SKELETON_OP)
             traversal%children(i_section)%stats%r_computation_time = traversal%children(i_section)%stats%r_computation_time - get_wtime()
-            traversal%children(i_section)%stats%r_last_step_computation_time = traversal%children(i_section)%stats%r_last_step_computation_time - get_wtime()
 #       else
             traversal%children(i_section)%stats%r_computation_time = -get_wtime()
 #       endif
@@ -343,7 +340,6 @@ subroutine traverse(traversal, grid)
 #       endif
 
         traversal%children(i_section)%stats%r_computation_time = traversal%children(i_section)%stats%r_computation_time + get_wtime()
-        traversal%children(i_section)%stats%r_last_step_computation_time = traversal%children(i_section)%stats%r_last_step_computation_time + get_wtime()
 
 #       if defined(_OPENMP_TASKS)
             !$omp end task
@@ -372,10 +368,8 @@ subroutine traverse(traversal, grid)
     do i_section = i_first_local_section, i_last_local_section
         assert_eq(i_section, grid%sections%elements_alloc(i_section)%index)
         traversal%children(i_section)%stats%r_computation_time = traversal%children(i_section)%stats%r_computation_time - get_wtime()
-        traversal%children(i_section)%stats%r_last_step_computation_time = traversal%children(i_section)%stats%r_last_step_computation_time - get_wtime()
         call post_traversal_wrapper(traversal%children(i_section), grid%sections%elements_alloc(i_section))
         traversal%children(i_section)%stats%r_computation_time = traversal%children(i_section)%stats%r_computation_time + get_wtime()
-        traversal%children(i_section)%stats%r_last_step_computation_time = traversal%children(i_section)%stats%r_last_step_computation_time + get_wtime()
 
     end do
 
@@ -410,6 +404,12 @@ subroutine traverse(traversal, grid)
 
     traversal%threads(i_thread)%stats = traversal%threads(i_thread)%stats + thread_traversal%stats
     grid%threads%elements(i_thread)%stats%t_statistics = grid%threads%elements(i_thread)%stats%t_statistics + thread_traversal%stats
+    
+    !$omp single
+        time_test = time_test + sum(traversal%children(:)%stats%r_computation_time) ! thread_traversal%stats%r_traversal_time - thread_traversal%stats%r_sync_time 
+    !$omp end single
+
+    
 end subroutine
 
 subroutine traverse_section_wrapper(thread_traversal, traversal, thread, section)

@@ -341,14 +341,13 @@
 #           endif
 
             !regular tsunami time steps begin after the earthquake is over
-
+            i_steps_since_last_lb = 0
 			do
 				if ((cfg%r_max_time >= 0.0 .and. grid%r_time > cfg%r_max_time) .or. (cfg%i_max_time_steps >= 0 .and. i_time_step >= cfg%i_max_time_steps)) then
 					exit
 				end if
 
 				call swe%adaption%traverse(grid)
-
 
 				!do a time step
 				call swe%euler%traverse(grid)
@@ -382,6 +381,7 @@
                 !print stats
                 if ((cfg%r_max_time >= 0.0d0 .and. grid%r_time * cfg%i_stats_phases >= i_stats_phase * cfg%r_max_time) .or. &
                     (cfg%i_max_time_steps >= 0 .and. i_time_step * cfg%i_stats_phases >= i_stats_phase * cfg%i_max_time_steps)) then
+
                     call update_stats(swe, grid)
 
                     i_stats_phase = i_stats_phase + 1
@@ -410,17 +410,34 @@
 
  			double precision, save          :: t_phase = huge(1.0d0)
  			double precision, save			:: t_total = 0
+ 			integer nt
+ 			
+ 			nt = omp_get_max_threads()
 
 			!$omp master
                 !Initially, just start the timer and don't print anything
                 if (t_phase < huge(1.0d0)) then
                     t_phase = t_phase + get_wtime()
+                    
 
                     call swe%init%reduce_stats(MPI_SUM, .true.)
                     call swe%displace%reduce_stats(MPI_SUM, .true.)
                     call swe%euler%reduce_stats(MPI_SUM, .true.)
                     call swe%adaption%reduce_stats(MPI_SUM, .true.)
                     call grid%reduce_stats(MPI_SUM, .true.)
+                    
+                    ! TODO: remove or organize this at some point
+                    !_log_write(0, '(6X, "AVG, Euler : ", F10.7, " , ", F10.7, " , ", F10.7, " , ", F10.7)') sum(swe%euler%threads(:)%stats%r_traversal_time)/nt, sum(swe%euler%threads(:)%stats%r_computation_time)/nt, sum(swe%euler%threads(:)%stats%r_sync_time)/nt, sum(swe%euler%threads(:)%stats%r_barrier_time)/nt
+                    !_log_write(0, '(6X, "MAX, Euler: ", F10.7)') maxval(swe%euler%threads(:)%stats%r_traversal_time)
+                    !_log_write(0, '(6X, "MIN, Euler: ", F10.7)') minval(swe%euler%threads(:)%stats%r_traversal_time)
+                    !_log_write(0, *) ""
+                    !_log_write(0, '(6X, "AVG, Adapt : ", F10.7, " , ", F10.7, " , ", F10.7, " , ", F10.7)') sum(swe%adaption%threads(:)%stats%r_traversal_time)/nt, sum(swe%adaption%threads(:)%stats%r_computation_time)/nt, sum(swe%adaption%threads(:)%stats%r_sync_time)/nt, sum(swe%adaption%threads(:)%stats%r_barrier_time)/nt
+                    !_log_write(0, '(6X, "MAX, Adapt: ", F10.7)') maxval(swe%adaption%threads(:)%stats%r_traversal_time)
+                    !_log_write(0, '(6X, "MIN, Adapt: ", F10.7)') minval(swe%adaption%threads(:)%stats%r_traversal_time)
+                    !_log_write(0, *) ""
+                    !_log_write(0, '(6X, "AVG, Grid : ", F10.7, " , ", F10.7, " , ", F10.7, " , ", F10.7)') sum(grid%threads%elements(:)%stats%r_traversal_time)/nt, sum(grid%threads%elements(:)%stats%r_computation_time)/nt, sum(grid%threads%elements(:)%stats%r_sync_time)/nt, sum(grid%threads%elements(:)%stats%r_barrier_time)/nt
+                    !_log_write(0, '(6X, "MAX, Grid : ", F10.7)') maxval(grid%threads%elements(:)%stats%r_traversal_time)
+                    !_log_write(0, '(6X, "MIN, Grid : ", F10.7)') minval(grid%threads%elements(:)%stats%r_traversal_time)
                     
                     t_total = t_total + t_phase
 

@@ -11,7 +11,6 @@ module Tools_statistics
 
 	type t_section_statistics
         double precision					        	    :: r_computation_time = 0.0d0
-        double precision                                    :: r_last_step_computation_time = 0.0d0 ! used for load balancing based on rank throughput
         double precision                                    :: r_asagi_time = 0.0d0
         integer (kind = selected_int_kind(8))			    :: i_traversals = 0
         integer (kind = selected_int_kind(16))			    :: i_traversed_cells = 0
@@ -79,7 +78,6 @@ module Tools_statistics
 
 		call reduce(s%r_traversal_time, v%r_traversal_time, mpi_op, .false.)
 		call reduce(s%r_computation_time, v%r_computation_time, mpi_op, .false.)
-		call reduce(s%r_last_step_computation_time, v%r_last_step_computation_time, mpi_op, .false.)
 		call reduce(s%r_sync_time, v%r_sync_time, mpi_op, .false.)
 		call reduce(s%r_barrier_time, v%r_barrier_time, mpi_op, .false.)
 		call reduce(s%r_asagi_time, v%r_asagi_time, mpi_op, .false.)
@@ -154,7 +152,6 @@ module Tools_statistics
 
 		sr%r_traversal_time = s2%r_traversal_time
 		sr%r_computation_time = s2%r_computation_time
-		sr%r_last_step_computation_time = s2%r_last_step_computation_time
 		sr%r_sync_time = s2%r_sync_time
 		sr%r_barrier_time = s2%r_barrier_time
 		sr%r_asagi_time = s2%r_asagi_time
@@ -173,7 +170,6 @@ module Tools_statistics
 
 		sr%r_traversal_time = s1%r_traversal_time + s2%r_traversal_time
 		sr%r_computation_time = s1%r_computation_time + s2%r_computation_time
-		sr%r_last_step_computation_time = s1%r_last_step_computation_time + s2%r_computation_time
 		sr%r_sync_time = s1%r_sync_time + s2%r_sync_time
 		sr%r_barrier_time = s1%r_barrier_time + s2%r_barrier_time
 		sr%r_asagi_time = s1%r_asagi_time + s2%r_asagi_time
@@ -218,7 +214,6 @@ module Tools_statistics
 
 		sr%r_traversal_time = -s1%r_traversal_time
 		sr%r_computation_time = -s1%r_computation_time
-        sr%r_last_step_computation_time = -s1%r_last_step_computation_time
 		sr%r_sync_time = -s1%r_sync_time
 		sr%r_barrier_time = -s1%r_barrier_time
 		sr%r_asagi_time = -s1%r_asagi_time
@@ -250,7 +245,6 @@ module Tools_statistics
 
 		sr%r_traversal_time = s%r_traversal_time * scaling
 		sr%r_computation_time = s%r_computation_time * scaling
-        sr%r_last_step_computation_time = s%r_last_step_computation_time * scaling
 		sr%r_sync_time = s%r_sync_time * scaling
 		sr%r_barrier_time = s%r_barrier_time * scaling
 		sr%r_asagi_time = s%r_asagi_time * scaling

@@ -40,6 +40,7 @@ module config
         logical                                 :: l_split_sections                                 !< if true, MPI load balancing may split sections, if false sections are treated as atomic units
         logical                                 :: l_serial_lb                                      !< if true, MPI load balancing is serialized, if false a distributed algorithm is used
         integer                                 :: i_lb_frequency                                   !< load balancing frequency: it will be applied every X steps
+        integer                                 :: i_lb_hh_ratio                                    !< load balancing frequency: it will be applied every X steps
         ! load balancing for heterogeneous hardware (HH):
         logical                                 :: l_lb_hh 		                                    !< if true, MPI load balancing can distribute the load unevenly
         logical                                 :: l_lb_hh_auto                                     !< if true, MPI load balancing considers the performance of each rank and distributes load accordingly
@@ -96,7 +97,7 @@ module config
 
         logical					                :: l_help, l_version
         integer          					    :: i, i_error
-        character(512)                          :: arguments
+        character(1024)                          :: arguments
         character(64), parameter           		:: lsolver_to_char(0:3) = [character(64) :: "Jacobi", "CG", "Pipelined CG", "Pipelined CG (unstable)"]
         character(64), parameter             	:: asagi_mode_to_char(0:4) = [character(64) :: "default", "pass through", "no mpi", "no mpi + small cache", "large grid"]
 
@@ -104,7 +105,7 @@ module config
 
         write(arguments, '(A)') "-v .false. --version .false. -h .false. --help .false."
         write(arguments, '(A, A)') trim(arguments),   " -lbtime .false. -lbsplit .false. -lbserial .false. -lbcellweight 1.0d0 -lbbndweight 0.0d0"
-        write(arguments, '(A, A)') trim(arguments),   " -lbhh .false. -lbfreq 5 -lbhhthreshold 0.1 -lbhhauto .false. "
+        write(arguments, '(A, A)') trim(arguments),   " -lbhh .false. -lbfreq 5 -lbhhthreshold 0.1 -lbhhauto .false. -lbhhratio 50 "
         write(arguments, '(A, A)') trim(arguments),  " -asagihints 2 -phases 1 -asciioutput_width 60 -asciioutput .false. -xmloutput .false. -stestpoints '' -noprint .false. -sections 4"
         write(arguments, '(A, A, I0)') trim(arguments), " -threads ", omp_get_max_threads()
 
@@ -158,6 +159,8 @@ module config
         config%courant_number = rget('samoa_courant')
         config%l_gridoutput = lget('samoa_xmloutput')
         config%s_testpoints = sget('samoa_stestpoints', 512)
+        
+        config%i_lb_hh_ratio = iget('samoa_lbhhratio')
 
 	if (len(trim(config%s_testpoints)) .ne. 2) then
 		config%l_pointoutput = .true.
