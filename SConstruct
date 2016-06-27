@@ -78,6 +78,8 @@ vars.AddVariables(
 
   PathVariable( 'asagi_dir', 'ASAGI directory', '.'),
 
+  PathVariable( 'netcdf_dir', 'NetCDF directory: only required when machine=mic, because NetCDF libs need to be compiled with -mmic.', '.'),
+
   EnumVariable( 'precision', 'floating point precision', 'double',
                 allowed_values=('single', 'double', 'quad')
               ),
@@ -318,8 +320,8 @@ if env['compiler'] == 'intel':
   elif env['machine'] == 'mic':
     env['F90FLAGS'] += ' -mmic'
     env['LINKFLAGS'] += ' -mmic'
-    if env['asagi'] != 'noasagi': # this is temporally -> an option netcdf_dir should be added!
-      env['LINKFLAGS'] += ' -L/home/hpc/pr45fi/di49rew/netcdf/install/lib -lnetcdf'
+    if env['netcdf_dir']: # this is temporally -> an option netcdf_dir should be added!
+      env['LINKFLAGS'] += ' -L' + env['netcdf_dir']  + '/lib -lnetcdf'
 
 #Enable or disable assertions
 if env['assertions']:
