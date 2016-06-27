@@ -203,7 +203,9 @@ if env['asagi'] != 'noasagi':
   if env['asagi'] == 'numa':
     env['F90FLAGS'] += ' -D_ASAGI_NUMA'
 
-  if env['openmp'] == 'noomp':
+  if env['machine'] == 'mic':
+    env.Append(LIBS = ['asagi_mic'])
+  elif env['openmp'] == 'noomp':
     env.Append(LIBS = ['asagi_nomt'])
   else:
     env.Append(LIBS = ['asagi'])
@@ -316,6 +318,8 @@ if env['compiler'] == 'intel':
   elif env['machine'] == 'mic':
     env['F90FLAGS'] += ' -mmic'
     env['LINKFLAGS'] += ' -mmic'
+    if env['asagi'] != 'noasagi': # this is temporally -> an option netcdf_dir should be added!
+      env['LINKFLAGS'] += ' -L/home/hpc/pr45fi/di49rew/netcdf/install/lib -lnetcdf'
 
 #Enable or disable assertions
 if env['assertions']:
