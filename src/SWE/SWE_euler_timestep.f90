@@ -360,6 +360,10 @@
 				real(kind = GRID_SR), DIMENSION(_SWE_PATCH_NUM_EDGES_ALIGNMENT)			:: hR, huR, hvR, bR
 				real(kind = GRID_SR), DIMENSION(_SWE_PATCH_NUM_EDGES_ALIGNMENT)			:: upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR
 				real(kind = GRID_SR), DIMENSION(_SWE_PATCH_NUM_EDGES_ALIGNMENT,2,2)		:: transf
+
+#                               if !defined (_SWE_USE_PATCH_SOLVER)
+				    real(kind = GRID_SR), dimension(2,3)						:: normals
+#                               endif
 				!DIR$ ASSUME_ALIGNED hL: 64
 				!DIR$ ASSUME_ALIGNED hR: 64
 				!DIR$ ASSUME_ALIGNED huL: 64
@@ -378,10 +382,8 @@
 				
 #				if !defined(_SWE_USE_PATCH_SOLVER)
 					! using patches, but applying geoclaw solvers on single edges
-					
+			
 					! the normals are only needed in this case.
-
-					real(kind = GRID_SR), dimension(2,3)						:: normals
 
 					! copy/compute normal vectors
 					! normal for type 2 edges is equal to the 2nd edge's normal
