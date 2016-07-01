@@ -1536,7 +1536,7 @@ module SFC_edge_traversal
             my_load = sum(grid%sections%elements_alloc(:)%load)
 
             ! if cfg%l_lb_hh_auto is not set, then use this 50-25-25 distribution
-            if (cfg%l_lb_hh_auto == .false.) then
+            if (cfg%l_lb_hh_auto .eqv. .false.) then
                 if (mod(rank_MPI,3) == 0) then 
                     my_throughput = cfg%i_lb_hh_ratio
                 else

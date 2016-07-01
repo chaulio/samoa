@@ -22,7 +22,7 @@ module Crossed_edge_stream
 #	define _CNT_DATA_TYPE    		type(t_crossed_edge_stream_data)
 #	define _CNT_TYPE_NAME    		t_crossed_edge_stream
 
-! #	include "Tools_stream.f90"
+#	include "Tools_stream.f90"
 end module
 
 !>Implements a stream for color edges
