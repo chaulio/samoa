@@ -8,7 +8,7 @@ MODULE SWE_PATCH_Solvers
 	
 	contains
 
-	subroutine compute_updates_fwave_simd(transform_matrices, hL, huL, hvL, bL, hR, huR, hvR, bR,upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR, maxWaveSpeed)
+	subroutine compute_updates_simd(transform_matrices, hL, huL, hvL, bL, hR, huR, hvR, bR,upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR, maxWaveSpeed)
 		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,2,2), intent(in)	:: transform_matrices
 		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout)	:: hL, hR, huL, huR, hvL, hvR, bL, bR
 		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(out)	:: upd_hL, upd_hR, upd_huL, upd_huR, upd_hvL, upd_hvR
@@ -24,59 +24,22 @@ MODULE SWE_PATCH_Solvers
 		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3)		:: wall
 		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT)		:: delphi
 		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT)		:: sL, sR, uhat, chat, sRoe1, sRoe2, sE1, sE2
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT)		:: delh, delhu, delb, deldelphi, delphidecomp, beta1, beta2
-		!DIR$ ASSUME_ALIGNED transform_matrices: 64
-		!DIR$ ASSUME_ALIGNED hL: 64
-		!DIR$ ASSUME_ALIGNED hR: 64
-		!DIR$ ASSUME_ALIGNED huL: 64
-		!DIR$ ASSUME_ALIGNED huR: 64
-		!DIR$ ASSUME_ALIGNED hvL: 64
-		!DIR$ ASSUME_ALIGNED hvR: 64
-		!DIR$ ASSUME_ALIGNED uL: 64
-		!DIR$ ASSUME_ALIGNED uR: 64
-		!DIR$ ASSUME_ALIGNED vL: 64
-		!DIR$ ASSUME_ALIGNED vR: 64
-		!DIR$ ASSUME_ALIGNED bL: 64
-		!DIR$ ASSUME_ALIGNED bR: 64
-		
-		!DIR$ ASSUME_ALIGNED upd_hL: 64
-		!DIR$ ASSUME_ALIGNED upd_hR: 64
-		!DIR$ ASSUME_ALIGNED upd_huL: 64
-		!DIR$ ASSUME_ALIGNED upd_huR: 64
-		!DIR$ ASSUME_ALIGNED upd_hvL: 64
-		!DIR$ ASSUME_ALIGNED upd_hvR: 64
 
-		!DIR$ ASSUME_ALIGNED waveSpeeds: 64
+		!DIR$ ASSUME_ALIGNED transform_matrices: 64
+		!DIR$ ASSUME_ALIGNED hL, hR, huL, huR, hvL, hvR, bL, bR: 64
+        !DIR$ ASSUME_ALIGNED upd_hL, upd_hR, upd_huL, upd_huR, upd_hvL, upd_hvR: 64
+        !DIR$ ASSUME_ALIGNED uL, uR, vL, vR: 64
+        
+        !DIR$ ASSUME_ALIGNED waveSpeeds: 64
 		!DIR$ ASSUME_ALIGNED fwaves: 64
 		!DIR$ ASSUME_ALIGNED wall: 64
 		!DIR$ ASSUME_ALIGNED delphi: 64
-		!DIR$ ASSUME_ALIGNED sL: 64
-		!DIR$ ASSUME_ALIGNED sR: 64
-		!DIR$ ASSUME_ALIGNED uhat: 64
-		!DIR$ ASSUME_ALIGNED chat: 64
-		!DIR$ ASSUME_ALIGNED sRoe1: 64
-		!DIR$ ASSUME_ALIGNED sRoe2: 64
-		!DIR$ ASSUME_ALIGNED sE1: 64
-		!DIR$ ASSUME_ALIGNED sE2: 64
-		!DIR$ ASSUME_ALIGNED delh: 64
-		!DIR$ ASSUME_ALIGNED delhu: 64
-		!DIR$ ASSUME_ALIGNED delb: 64
-		!DIR$ ASSUME_ALIGNED deldelphi: 64
-		!DIR$ ASSUME_ALIGNED delphidecomp: 64
-		!DIR$ ASSUME_ALIGNED beta1: 64
-		!DIR$ ASSUME_ALIGNED beta2: 64
-
-		!TODO: clear this
-		! compute transformations matrices
-! 		associate(geom => SWE_PATCH_geometry)
-! 			do i=1,_SWE_PATCH_NUM_EDGES 
-! 				transform_matrices(i,1,:) = normals(:,geom%edges_orientation(i))
-! 				transform_matrices(i,2,:) = [ - normals(2,geom%edges_orientation(i)), normals(1,geom%edges_orientation(i)) ]
-! 			end do
-! 		end associate
+		!DIR$ ASSUME_ALIGNED sL, sR, uhat, chat, sRoe1, sRoe2, sE1, sE2: 64
 
 
-		! *** F-Wave solver *** (based on geoclaw implementation)
+
+		! *** F-Wave/AugRie solvers *** (based on geoclaw implementation)
+        
 		!samoa considers bathymetry included in h, the solver doesn't
 		hL = hL - bL
 		hR = hR - bR
@@ -174,35 +137,14 @@ MODULE SWE_PATCH_Solvers
 		!*******************
 		!* call the solver *
 		!*******************
-			
-			!determine del vectors
-			delh = hR - hL
-			delhu = huR - huL
-			delb = bR - bL
-			
-			deldelphi = -g * 0.5_GRID_SR * (hR + hL) * delb
-			delphidecomp = delphi - deldelphi
-			
-			!flux decomposition
-			beta1 = (sE2*delhu - delphidecomp) / (sE2 - sE1)
-			beta2 = (delphidecomp - sE1*delhu) / (sE2 - sE1)
-			
-			waveSpeeds(:,1) = sE1
-			waveSpeeds(:,2) = 0.5_GRID_SR * (sE1+sE2)
-			waveSpeeds(:,3) = sE2
-			! 1st nonlinear wave
-			fwaves(:,1,1) = beta1
-			fwaves(:,2,1) = beta1*sE1
-			fwaves(:,3,1) = beta1*vL
-			! 2nd nonlinear wave
-			fwaves(:,1,3) = beta2
-			fwaves(:,2,3) = beta2*sE2
-			fwaves(:,3,3) = beta2*vR
-			! advection of transverse wave
-			fwaves(:,1,2) = 0.0_GRID_SR
-			fwaves(:,2,2) = 0.0_GRID_SR
-			fwaves(:,3,2) = huR*vR - huL*vL - fwaves(:,3,1)-fwaves(:,3,3)
-			
+
+#       if defined(_SWE_FWAVE)
+            call riemann_fwave_simd(hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,sE1,sE2,cfg%dry_tolerance,g,waveSpeeds,fWaves)
+#       elif defined(_SWE_AUG_RIEMANN)
+
+#       else
+#           error "No valid SWE solver defined"
+#       endif
 		!*****************
 		!* end of solver *
 		!*****************
@@ -262,6 +204,63 @@ MODULE SWE_PATCH_Solvers
 		call apply_transformations_after(transform_matrices, upd_huL, upd_hvL)
 		call apply_transformations_after(transform_matrices, upd_huR, upd_hvR)
 		
+	end subroutine
+	
+	subroutine riemann_fwave_simd(hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,s1,s2,drytol,g,sw,fw)
+        
+        ! --> implementation with vectorization on patches
+      
+        ! solve shallow water equations given single left and right states
+        ! solution has two waves.
+        ! flux - source is decomposed.
+        
+        implicit none
+
+        !input
+        integer :: meqn, mwaves
+
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout) :: hL,hR,huL,huR,bL,bR,uL,uR,delphi,s1,s2
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout) :: hvL,hvR,vL,vR
+        real(kind = GRID_SR), intent(in) :: drytol,g
+
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3), intent(inout) ::  sw
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3,3), intent(inout) ::  fw
+
+        !local
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: delh, delhu, delb, deldelphi, delphidecomp, beta1, beta2
+
+
+        !DIR$ ASSUME_ALIGNED hL,hR,huL,huR,bL,bR,uL,uR,delphi,s1,s2,hvL,hvR,vL,vR : 64
+        !DIR$ ASSUME_ALIGNED sw,fw : 64
+        !DIR$ ASSUME_ALIGNED delh, delhu, delb, deldelphi, delphidecomp, beta1, beta2 : 64
+        
+        !determine del vectors
+        delh = hR-hL
+        delhu = huR-huL
+        delb = bR-bL
+
+        deldelphi = -g*0.5d0*(hR+hL)*delb
+        delphidecomp = delphi - deldelphi
+
+        !flux decomposition
+        beta1 = (s2*delhu - delphidecomp)/(s2-s1)
+        beta2 = (delphidecomp - s1*delhu)/(s2-s1)
+
+        sw(:,1)=s1
+        sw(:,2)=0.5d0*(s1+s2)
+        sw(:,3)=s2
+        ! 1st nonlinear wave
+        fw(:,1,1) = beta1
+        fw(:,2,1) = beta1*s1
+        fw(:,3,1) = beta1*vL
+        ! 2nd nonlinear wave
+        fw(:,1,3) = beta2
+        fw(:,2,3) = beta2*s2
+        fw(:,3,3) = beta2*vR
+        ! advection of transverse wave
+        fw(:,1,2) = 0.d0
+        fw(:,2,2) = 0.d0
+        fw(:,3,2) = huR*vR - huL*vL -fw(:,3,1)-fw(:,3,3)
 	end subroutine
 	
 	subroutine compute_updates_hlle_simd(transform_matrices, hL, huL, hvL, bL, hR, huR, hvR, bR, upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR, maxWaveSpeed)

@@ -463,8 +463,8 @@
 #					if defined (_SWE_USE_PATCH_SOLVER)
 						transf = geom%transform_matrices(:,:,:,element%cell%geometry%i_plotter_type)
 						!associate(transf => geom%transform_matrices(:,:,:,element%cell%geometry%i_plotter_type))
-#							if defined(_SWE_FWAVE)
-								call compute_updates_fwave_simd(transf, hL, huL, hvL, bL, hR, huR, hvR, bR, upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR, maxWaveSpeed)
+#							if defined(_SWE_FWAVE) || defined(_SWE_AUG_RIEMANN)
+								call compute_updates_simd(transf, hL, huL, hvL, bL, hR, huR, hvR, bR, upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR, maxWaveSpeed)
 #							elif defined(_SWE_HLLE)
 								call compute_updates_hlle_simd(transf, hL, huL, hvL, bL, hR, huR, hvR, bR, upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR, maxWaveSpeed)
 #							else
