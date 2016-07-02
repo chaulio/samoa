@@ -253,7 +253,7 @@ if env['swe_patch_solver']:
   
 #Check if solver is really available (some are not/only available when using patch solvers)
 if (int(env['swe_patch_order'])) > 1 and env['swe_patch_solver']:
-	if env['swe_solver'] != 'hlle' and env['swe_solver'] != 'fwave':
+	if env['swe_solver'] != 'hlle' and env['swe_solver'] != 'fwave' and env['swe_solver'] != 'aug_riemann':
 		print "Error: Only hlle and fwave solvers are available as patch solvers. Try using another solver or setting swe_patch_solver=True"
 		Exit(-1)
 else:

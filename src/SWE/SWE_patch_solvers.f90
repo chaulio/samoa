@@ -217,8 +217,6 @@ MODULE SWE_PATCH_Solvers
         implicit none
 
         !input
-        integer :: meqn, mwaves
-
         real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout) :: hL,hR,huL,huR,bL,bR,uL,uR,delphi,s1,s2
         real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout) :: hvL,hvR,vL,vR
         real(kind = GRID_SR), intent(in) :: drytol,g
@@ -262,6 +260,268 @@ MODULE SWE_PATCH_Solvers
         fw(:,2,2) = 0.d0
         fw(:,3,2) = huR*vR - huL*vL -fw(:,3,1)-fw(:,3,3)
 	end subroutine
+	
+	subroutine riemann_augrie_simd(maxiter,hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,sE1,sE2,drytol,g,sw,fw)
+        
+        ! --> implementation with vectorization on patches
+      
+        ! solve shallow water equations given single left and right states
+        ! This solver is described in J. Comput. Phys. (6): 3089-3113, March 2008
+        ! Augmented Riemann Solvers for the Shallow Equations with Steady States and Inundation
+
+        ! To use the original solver call with maxiter=1.
+
+        ! This solver allows iteration when maxiter > 1. The iteration seems to help with
+        ! instabilities that arise (with any solver) as flow becomes transcritical over variable topo
+        ! due to loss of hyperbolicity.
+
+
+
+        implicit none
+
+        !input
+        integer maxiter
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3,3), intent(inout) :: fw
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3), intent(inout) :: sw
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout) :: hL,hR,huL,huR,bL,bR,uL,uR,delphi,sE1,sE2
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout) :: hvL,hvR,vL,vR
+        real(kind = GRID_SR) :: drytol, g
+
+        !local
+        integer, parameter :: mwaves = 3, meqn = 3
+        integer :: m,mw,k,iter, i
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3,3) :: A, r
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3) :: lambda, del, beta
+
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: delh,delhu,delb,delnorm
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: rare1st,rare2st,sdelta,raremin,raremax
+        double precision criticaltol,convergencetol,raretol
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: s1s2bar,s1s2tilde,hbar,hLstar,hRstar,hustar
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: huRstar,huLstar,uRstar,uLstar,hstarHLL
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: deldelh,deldelphi
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: s1m,s2m,hm
+        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: det1,det2,det3,determinant
+
+        logical, dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: rare1,rare2,rarecorrector,rarecorrectortest,sonic
+
+
+        !determine del vectors
+        delh = hR-hL
+        delhu = huR-huL
+        delb = bR-bL
+        delnorm = delh**2 + delphi**2
+
+        do i=1,_SWE_PATCH_NUM_EDGES
+            call riemanntype(hL(i),hR(i),uL(i),uR(i),hm(i),s1m(i),s2m(i),rare1(i),rare2(i),1,drytol,g)
+        end do
+
+        lambda(:,1)= min(sE1,s2m) !Modified Einfeldt speed
+        lambda(:,3)= max(sE2,s1m) !Modified Eindfeldt speed
+        sE1=lambda(:,1)
+        sE2=lambda(:,3)
+        hstarHLL = max((huL-huR+sE2*hR-sE1*hL)/(sE2-sE1),0.d0) ! middle state in an HLL solve
+
+        !determine the middle entropy corrector wave------------------------
+        rarecorrectortest=.false.
+        rarecorrector=.false.
+        where (rarecorrectortest) 
+            sdelta=lambda(:,3)-lambda(:,1)
+            raremin = 0.5d0
+            raremax = 0.9d0
+            where (rare1.and.sE1*s1m.lt.0.d0) raremin=0.2d0
+            where (rare2.and.sE2*s2m.lt.0.d0) raremin=0.2d0
+            where (rare1.or.rare2)
+                !see which rarefaction is larger
+                rare1st=3.d0*(sqrt(g*hL)-sqrt(g*hm))
+                rare2st=3.d0*(sqrt(g*hR)-sqrt(g*hm))
+                where (max(rare1st,rare2st).gt.raremin*sdelta .and. max(rare1st,rare2st).lt.raremax*sdelta)
+                    rarecorrector=.true.
+                where (rare1st.gt.rare2st)
+                    lambda(:,2)=s1m
+                elsewhere (rare2st.gt.rare1st)
+                    lambda(:,2)=s2m
+                elsewhere
+                    lambda(:,2)=0.5d0*(s1m+s2m)
+                end where
+                end where
+            end where
+            where (hstarHLL.lt.min(hL,hR)/5.d0) rarecorrector=.false.
+        end where
+        
+        where (dabs(lambda(:,2)) .lt. 1.d-20) lambda(:,2) = 0.d0
+        
+        do mw=1,mwaves
+            r(:,1,mw)=1.d0
+            r(:,2,mw)=lambda(:,mw)
+            r(:,3,mw)=(lambda(:,mw))**2
+        enddo
+        
+        where (.not.rarecorrector)
+            lambda(:,2) = 0.5d0*(lambda(:,1)+lambda(:,3))
+            lambda(:,2) = max(min(0.5d0*(s1m+s2m),sE2),sE1)
+            where (dabs(lambda(:,2)) .lt. 1.d-20) lambda(:,2) = 0.d0
+            r(:,1,2)=0.d0
+            r(:,2,2)=0.d0
+            r(:,3,2)=1.d0
+        end where
+        !---------------------------------------------------
+
+        !determine the steady state wave -------------------
+        criticaltol = 1.d-6
+        deldelh = -delb
+        deldelphi = -g*0.5d0*(hR+hL)*delb
+
+        !determine a few quanitites needed for steady state wave if iterated
+        hLstar=hL
+        hRstar=hR
+        uLstar=uL
+        uRstar=uR
+        huLstar=uLstar*hLstar
+        huRstar=uRstar*hRstar
+
+        !iterate to better determine the steady state wave
+        convergencetol=1.d-6
+        do iter=1,maxiter
+            !determine steady state wave (this will be subtracted from the delta vectors)
+            where (min(hLstar,hRstar).lt.drytol.and.rarecorrector)
+                rarecorrector=.false.
+                hLstar=hL
+                hRstar=hR
+                uLstar=uL
+                uRstar=uR
+                huLstar=uLstar*hLstar
+                huRstar=uRstar*hRstar
+                lambda(:,2) = 0.5d0*(lambda(:,1)+lambda(:,3))
+                lambda(:,2) = max(min(0.5d0*(s1m+s2m),sE2),sE1)
+                where (dabs(lambda(:,2)) .lt. 1.d-20) lambda(:,2) = 0.d0
+                r(:,1,2)=0.d0
+                r(:,2,2)=0.d0
+                r(:,3,2)=1.d0
+            end where
+
+            hbar =  max(0.5d0*(hLstar+hRstar),0.d0)
+            s1s2bar = 0.25d0*(uLstar+uRstar)**2 - g*hbar
+            s1s2tilde= max(0.d0,uLstar*uRstar) - g*hbar
+
+            !find if sonic problem
+            sonic=.false.
+            where (abs(s1s2bar).le.criticaltol) sonic=.true.
+            where (s1s2bar*s1s2tilde.le.criticaltol) sonic=.true.
+            where (s1s2bar*sE1*sE2.le.criticaltol) sonic = .true.
+            where (min(abs(sE1),abs(sE2)).lt.criticaltol) sonic=.true.
+            where (sE1.lt.0.d0.and.s1m.gt.0.d0) sonic = .true.
+            where (sE2.gt.0.d0.and.s2m.lt.0.d0) sonic = .true.
+            where ((uL+sqrt(g*hL))*(uR+sqrt(g*hR)).lt.0.d0) sonic=.true.
+            where ((uL-sqrt(g*hL))*(uR-sqrt(g*hR)).lt.0.d0) sonic=.true.
+
+            !find jump in h, deldelh
+            where (sonic) 
+                deldelh =  -delb
+            elsewhere
+                deldelh = delb*g*hbar/s1s2bar
+            end where
+
+
+            
+            !find bounds in case of critical state resonance, or negative states
+            where (sE1.lt.-criticaltol.and.sE2.gt.criticaltol) 
+                deldelh = min(deldelh,hstarHLL*(sE2-sE1)/sE2)
+                deldelh = max(deldelh,hstarHLL*(sE2-sE1)/sE1)
+            elsewhere (sE1.ge.criticaltol)
+                deldelh = min(deldelh,hstarHLL*(sE2-sE1)/sE1)
+                deldelh = max(deldelh,-hL)
+            elsewhere (sE2.le.-criticaltol)
+                deldelh = min(deldelh,hR)
+                deldelh = max(deldelh,hstarHLL*(sE2-sE1)/sE2)
+            end where
+
+            !find jump in phi, deldelphi
+            where (sonic) 
+                deldelphi = -g*hbar*delb
+            elsewhere
+                deldelphi = -delb*g*hbar*s1s2tilde/s1s2bar
+            end where
+         
+            !find bounds in case of critical state resonance, or negative states
+            deldelphi=min(deldelphi,g*max(-hLstar*delb,-hRstar*delb))
+            deldelphi=max(deldelphi,g*min(-hLstar*delb,-hRstar*delb))
+
+            del(:,1)=delh-deldelh
+            del(:,2)=delhu
+            del(:,3)=delphi-deldelphi
+
+            !Determine determinant of eigenvector matrix========
+            det1=r(:,1,1)*(r(:,2,2)*r(:,3,3)-r(:,2,3)*r(:,3,2))
+            det2=r(:,1,2)*(r(:,2,1)*r(:,3,3)-r(:,2,3)*r(:,3,1))
+            det3=r(:,1,3)*(r(:,2,1)*r(:,3,2)-r(:,2,2)*r(:,3,1))
+            determinant=det1-det2+det3
+            
+
+
+            !solve for beta(k) using Cramers Rule=================
+            do k=1,3
+                do mw=1,3
+                do m=1,3
+                    A(:,m,mw)=r(:,m,mw)
+                    A(:,m,k)=del(:,m)
+                enddo
+                enddo
+                det1=A(:,1,1)*(A(:,2,2)*A(:,3,3)-A(:,2,3)*A(:,3,2))
+                det2=A(:,1,2)*(A(:,2,1)*A(:,3,3)-A(:,2,3)*A(:,3,1))
+                det3=A(:,1,3)*(A(:,2,1)*A(:,3,2)-A(:,2,2)*A(:,3,1))
+                beta(:,k)=(det1-det2+det3)/determinant
+            enddo
+
+            !exit if things aren't changing --> not anymore, with vectorization we can't leave early
+            !if (abs(del(1)**2+del(3)**2-delnorm).lt.convergencetol) exit
+            
+            delnorm = del(:,1)**2+del(:,3)**2
+            !find new states qLstar and qRstar on either side of interface
+            hLstar=hL
+            hRstar=hR
+            uLstar=uL
+            uRstar=uR
+            huLstar=uLstar*hLstar
+            huRstar=uRstar*hRstar
+            do mw=1,mwaves
+                where (lambda(:,mw).lt.0.d0)
+                hLstar= hLstar + beta(:,mw)*r(:,1,mw)
+                huLstar= huLstar + beta(:,mw)*r(:,2,mw)
+                end where
+            enddo
+            do mw=mwaves,1,-1
+                where (lambda(:,mw).gt.0.d0)
+                hRstar= hRstar - beta(:,mw)*r(:,1,mw)
+                huRstar= huRstar - beta(:,mw)*r(:,2,mw)
+                end where
+            enddo
+
+            where (hLstar.gt.drytol) 
+                uLstar=huLstar/hLstar
+            else where
+                hLstar=max(hLstar,0.d0)
+                uLstar=0.d0
+            end where
+            where (hRstar.gt.drytol) 
+                uRstar=huRstar/hRstar
+            else where
+                hRstar=max(hRstar,0.d0)
+                uRstar=0.d0
+            end where
+
+        enddo ! end iteration on Riemann problem
+
+        do mw=1,mwaves
+            sw(:,mw)=lambda(:,mw)
+            fw(:,1,mw)=beta(:,mw)*r(:,2,mw)
+            fw(:,2,mw)=beta(:,mw)*r(:,3,mw)
+            fw(:,3,mw)=beta(:,mw)*r(:,2,mw)
+        enddo
+        !find transverse components (ie huv jumps).
+        fw(:,3,1)=fw(:,3,1)*vL
+        fw(:,3,3)=fw(:,3,3)*vR
+        fw(:,3,2)= hR*uR*vR - hL*uL*vL - fw(:,3,1)- fw(:,3,3)
+    end subroutine
 	
 	subroutine compute_updates_hlle_simd(transform_matrices, hL, huL, hvL, bL, hR, huR, hvR, bR, upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR, maxWaveSpeed)
 		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,2,2),intent(in)	:: transform_matrices
