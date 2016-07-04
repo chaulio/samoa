@@ -141,9 +141,7 @@ MODULE SWE_PATCH_Solvers
 #       if defined(_SWE_FWAVE)
             call riemann_fwave_simd(hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,sE1,sE2,cfg%dry_tolerance,g,waveSpeeds,fWaves)
 #       elif defined(_SWE_AUG_RIEMANN)
-
-#       else
-#           error "No valid SWE solver defined"
+            call riemann_augrie_simd(1,hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,sE1,sE2,cfg%dry_tolerance,g,waveSpeeds,fWaves)
 #       endif
 		!*****************
 		!* end of solver *

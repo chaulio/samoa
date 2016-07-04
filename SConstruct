@@ -320,7 +320,7 @@ if env['compiler'] == 'intel':
   elif env['machine'] == 'mic':
     env['F90FLAGS'] += ' -mmic'
     env['LINKFLAGS'] += ' -mmic'
-    if env['netcdf_dir' != '.']: 
+    if env['netcdf_dir'] != '.': 
       env['LINKFLAGS'] += ' -L' + env['netcdf_dir']  + '/lib -lnetcdf'
 
 #Enable or disable assertions
