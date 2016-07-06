@@ -26,15 +26,15 @@ MODULE SWE_PATCH_Solvers
 		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT)		:: sL, sR, uhat, chat, sRoe1, sRoe2, sE1, sE2
 
 		!DIR$ ASSUME_ALIGNED transform_matrices: 64
-		!DIR$ ASSUME_ALIGNED hL, hR, huL, huR, hvL, hvR, bL, bR: 64
-        !DIR$ ASSUME_ALIGNED upd_hL, upd_hR, upd_huL, upd_huR, upd_hvL, upd_hvR: 64
-        !DIR$ ASSUME_ALIGNED uL, uR, vL, vR: 64
+		!DIR$ ASSUME_ALIGNED hL:64, hR:64, huL:64, huR:64, hvL:64, hvR:64, bL:64, bR: 64
+        !DIR$ ASSUME_ALIGNED upd_hL:64, upd_hR:64, upd_huL:64, upd_huR:64, upd_hvL:64, upd_hvR: 64
+        !DIR$ ASSUME_ALIGNED uL:64, uR:64, vL:64, vR: 64
         
         !DIR$ ASSUME_ALIGNED waveSpeeds: 64
 		!DIR$ ASSUME_ALIGNED fwaves: 64
 		!DIR$ ASSUME_ALIGNED wall: 64
 		!DIR$ ASSUME_ALIGNED delphi: 64
-		!DIR$ ASSUME_ALIGNED sL, sR, uhat, chat, sRoe1, sRoe2, sE1, sE2: 64
+		!DIR$ ASSUME_ALIGNED sL:64, sR:64, uhat:64, chat:64, sRoe1:64, sRoe2:64, sE1:64, sE2: 64
 
 
 
@@ -226,9 +226,9 @@ MODULE SWE_PATCH_Solvers
         real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: delh, delhu, delb, deldelphi, delphidecomp, beta1, beta2
 
 
-        !DIR$ ASSUME_ALIGNED hL,hR,huL,huR,bL,bR,uL,uR,delphi,s1,s2,hvL,hvR,vL,vR : 64
-        !DIR$ ASSUME_ALIGNED sw,fw : 64
-        !DIR$ ASSUME_ALIGNED delh, delhu, delb, deldelphi, delphidecomp, beta1, beta2 : 64
+        !DIR$ ASSUME_ALIGNED hL:64, hR:64, huL:64, huR:64, bL:64, bR:64, uL:64, uR:64, delphi:64, s1:64, s2:64, hvL:64, hvR:64, vL:64, vR:64
+        !DIR$ ASSUME_ALIGNED sw:64, fw:64
+        !DIR$ ASSUME_ALIGNED delh:64, delhu:64, delb:64, deldelphi:64, delphidecomp:64, beta1:64, beta2:64
         
         !determine del vectors
         delh = hR-hL
@@ -301,6 +301,19 @@ MODULE SWE_PATCH_Solvers
         real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: det1,det2,det3,determinant
 
         logical, dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: rare1,rare2,rarecorrector,rarecorrectortest,sonic
+        
+        !DIR$ ASSUME_ALIGNED fw:64, sw:64
+        !DIR$ ASSUME_ALIGNED hL:64, hR:64, huL:64, huR:64, bL:64, bR:64, uL:64, uR:64, delphi:64, sE1:64,sE2:64
+        !DIR$ ASSUME_ALIGNED hL:64, hvL:64, hvR:64, vL:64, vR:64
+        !DIR$ ASSUME_ALIGNED A:64, r:64, lambda:64, del:64, beta:64
+        !DIR$ ASSUME_ALIGNED delh:64, delhu:64, delb:64, delnorm:64
+        !DIR$ ASSUME_ALIGNED rare1st:64, rare2st:64, sdelta:64, raremin:64, raremax:64
+        !DIR$ ASSUME_ALIGNED s1s2bar:64, s1s2tilde:64, hbar:64, hLstar:64, hRstar:64, hustar:64
+        !DIR$ ASSUME_ALIGNED huRstar:64, huLstar:64, uRstar:64, uLstar:64, hstarHLL:64
+        !DIR$ ASSUME_ALIGNED deldelh:64, deldelphi:64
+        !DIR$ ASSUME_ALIGNED s1m:64, s2m:64, hm:64
+        !DIR$ ASSUME_ALIGNED det1:64, det2:64, det3:64, determinant:64
+        !DIR$ ASSUME_ALIGNED rare1:64, rare2:64, rarecorrector:64, rarecorrectortest:64, sonic:64
 
 
         !determine del vectors
