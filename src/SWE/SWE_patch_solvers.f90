@@ -293,7 +293,7 @@ MODULE SWE_PATCH_Solvers
 
         real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: delh,delhu,delb,delnorm
         real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: rare1st,rare2st,sdelta,raremin,raremax
-        double precision criticaltol,convergencetol,raretol
+        real(kind = GRID_SR)                                            :: criticaltol,convergencetol,raretol
         real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: s1s2bar,s1s2tilde,hbar,hLstar,hRstar,hustar
         real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: huRstar,huLstar,uRstar,uLstar,hstarHLL
         real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: deldelh,deldelphi
@@ -330,21 +330,21 @@ MODULE SWE_PATCH_Solvers
         lambda(:,3)= max(sE2,s1m) !Modified Eindfeldt speed
         sE1=lambda(:,1)
         sE2=lambda(:,3)
-        hstarHLL = max((huL-huR+sE2*hR-sE1*hL)/(sE2-sE1),0.d0) ! middle state in an HLL solve
+        hstarHLL = max((huL-huR+sE2*hR-sE1*hL)/(sE2-sE1),0.0_GRID_SR) ! middle state in an HLL solve
 
         !determine the middle entropy corrector wave------------------------
         rarecorrectortest=.false.
         rarecorrector=.false.
         where (rarecorrectortest) 
             sdelta=lambda(:,3)-lambda(:,1)
-            raremin = 0.5d0
-            raremax = 0.9d0
-            where (rare1.and.sE1*s1m.lt.0.d0) raremin=0.2d0
-            where (rare2.and.sE2*s2m.lt.0.d0) raremin=0.2d0
+            raremin = 0.5_GRID_SR
+            raremax = 0.9_GRID_SR
+            where (rare1.and.sE1*s1m.lt.0.d0) raremin=0.2_GRID_SR
+            where (rare2.and.sE2*s2m.lt.0.d0) raremin=0.2_GRID_SR
             where (rare1.or.rare2)
                 !see which rarefaction is larger
-                rare1st=3.d0*(sqrt(g*hL)-sqrt(g*hm))
-                rare2st=3.d0*(sqrt(g*hR)-sqrt(g*hm))
+                rare1st=3.0_GRID_SR*(sqrt(g*hL)-sqrt(g*hm))
+                rare2st=3.0_GRID_SR*(sqrt(g*hR)-sqrt(g*hm))
                 where (max(rare1st,rare2st).gt.raremin*sdelta .and. max(rare1st,rare2st).lt.raremax*sdelta)
                     rarecorrector=.true.
                 where (rare1st.gt.rare2st)
@@ -352,35 +352,35 @@ MODULE SWE_PATCH_Solvers
                 elsewhere (rare2st.gt.rare1st)
                     lambda(:,2)=s2m
                 elsewhere
-                    lambda(:,2)=0.5d0*(s1m+s2m)
+                    lambda(:,2)=0.5_GRID_SR*(s1m+s2m)
                 end where
                 end where
             end where
-            where (hstarHLL.lt.min(hL,hR)/5.d0) rarecorrector=.false.
+            where (hstarHLL.lt.min(hL,hR)*0.2_GRID_SR) rarecorrector=.false.
         end where
         
-        where (dabs(lambda(:,2)) .lt. 1.d-20) lambda(:,2) = 0.d0
+        where (dabs(lambda(:,2)) .lt. 1.e-20_GRID_SR) lambda(:,2) = 0.0_GRID_SR
         
         do mw=1,mwaves
-            r(:,1,mw)=1.d0
+            r(:,1,mw)=1.0_GRID_SR
             r(:,2,mw)=lambda(:,mw)
             r(:,3,mw)=(lambda(:,mw))**2
         enddo
         
         where (.not.rarecorrector)
-            lambda(:,2) = 0.5d0*(lambda(:,1)+lambda(:,3))
-            lambda(:,2) = max(min(0.5d0*(s1m+s2m),sE2),sE1)
-            where (dabs(lambda(:,2)) .lt. 1.d-20) lambda(:,2) = 0.d0
-            r(:,1,2)=0.d0
-            r(:,2,2)=0.d0
-            r(:,3,2)=1.d0
+            lambda(:,2) = 0.5_GRID_SR*(lambda(:,1)+lambda(:,3))
+            lambda(:,2) = max(min(0.5_GRID_SR*(s1m+s2m),sE2),sE1)
+            where (dabs(lambda(:,2)) .lt. 1.d-20) lambda(:,2) = 0.0_GRID_SR
+            r(:,1,2)=0.0_GRID_SR
+            r(:,2,2)=0.0_GRID_SR
+            r(:,3,2)=1.0_GRID_SR
         end where
         !---------------------------------------------------
 
         !determine the steady state wave -------------------
-        criticaltol = 1.d-6
+        criticaltol = 1.e-6_GRID_SR
         deldelh = -delb
-        deldelphi = -g*0.5d0*(hR+hL)*delb
+        deldelphi = -g*0.5_GRID_SR*(hR+hL)*delb
 
         !determine a few quanitites needed for steady state wave if iterated
         hLstar=hL
@@ -391,7 +391,7 @@ MODULE SWE_PATCH_Solvers
         huRstar=uRstar*hRstar
 
         !iterate to better determine the steady state wave
-        convergencetol=1.d-6
+        convergencetol=1.e-6_GRID_SR
         do iter=1,maxiter
             !determine steady state wave (this will be subtracted from the delta vectors)
             where (min(hLstar,hRstar).lt.drytol.and.rarecorrector)
@@ -402,28 +402,21 @@ MODULE SWE_PATCH_Solvers
                 uRstar=uR
                 huLstar=uLstar*hLstar
                 huRstar=uRstar*hRstar
-                lambda(:,2) = 0.5d0*(lambda(:,1)+lambda(:,3))
-                lambda(:,2) = max(min(0.5d0*(s1m+s2m),sE2),sE1)
-                where (dabs(lambda(:,2)) .lt. 1.d-20) lambda(:,2) = 0.d0
-                r(:,1,2)=0.d0
-                r(:,2,2)=0.d0
-                r(:,3,2)=1.d0
+                lambda(:,2) = 0.5_GRID_SR*(lambda(:,1)+lambda(:,3))
+                lambda(:,2) = max(min(0.5_GRID_SR*(s1m+s2m),sE2),sE1)
+                where (dabs(lambda(:,2)) .lt. 1.0_GRID_SR) lambda(:,2) = 0.0_GRID_SR
+                r(:,1,2)=0.0_GRID_SR
+                r(:,2,2)=0.0_GRID_SR
+                r(:,3,2)=1.0_GRID_SR
             end where
 
-            hbar =  max(0.5d0*(hLstar+hRstar),0.d0)
-            s1s2bar = 0.25d0*(uLstar+uRstar)**2 - g*hbar
-            s1s2tilde= max(0.d0,uLstar*uRstar) - g*hbar
+            hbar =  max(0.5_GRID_SR*(hLstar+hRstar),0.0_GRID_SR)
+            s1s2bar = 0.25_GRID_SR*(uLstar+uRstar)**2 - g*hbar
+            s1s2tilde= max(0.0_GRID_SR,uLstar*uRstar) - g*hbar
 
             !find if sonic problem
-            sonic=.false.
-            where (abs(s1s2bar).le.criticaltol) sonic=.true.
-            where (s1s2bar*s1s2tilde.le.criticaltol) sonic=.true.
-            where (s1s2bar*sE1*sE2.le.criticaltol) sonic = .true.
-            where (min(abs(sE1),abs(sE2)).lt.criticaltol) sonic=.true.
-            where (sE1.lt.0.d0.and.s1m.gt.0.d0) sonic = .true.
-            where (sE2.gt.0.d0.and.s2m.lt.0.d0) sonic = .true.
-            where ((uL+sqrt(g*hL))*(uR+sqrt(g*hR)).lt.0.d0) sonic=.true.
-            where ((uL-sqrt(g*hL))*(uR-sqrt(g*hR)).lt.0.d0) sonic=.true.
+            sonic = abs(s1s2bar).le.criticaltol .OR. s1s2bar*s1s2tilde.le.criticaltol .OR. s1s2bar*sE1*sE2.le.criticaltol .OR. min(abs(sE1),abs(sE2)).lt.criticaltol
+            sonic = sonic .OR. sE1.lt.0.0_GRID_SR.and.s1m.gt.0.0_GRID_SR .OR. sE2.gt.0.0_GRID_SR.and.s2m.lt.0.0_GRID_SR .OR. (uL+sqrt(g*hL))*(uR+sqrt(g*hR)).lt.0.0_GRID_SR .OR. (uL-sqrt(g*hL))*(uR-sqrt(g*hR)).lt.0.0_GRID_SR
 
             !find jump in h, deldelh
             where (sonic) 
@@ -471,12 +464,9 @@ MODULE SWE_PATCH_Solvers
 
             !solve for beta(k) using Cramers Rule=================
             do k=1,3
-                do mw=1,3
-                do m=1,3
-                    A(:,m,mw)=r(:,m,mw)
-                    A(:,m,k)=del(:,m)
-                enddo
-                enddo
+                A = r
+                A(:,:,k) = del(:,:)
+
                 det1=A(:,1,1)*(A(:,2,2)*A(:,3,3)-A(:,2,3)*A(:,3,2))
                 det2=A(:,1,2)*(A(:,2,1)*A(:,3,3)-A(:,2,3)*A(:,3,1))
                 det3=A(:,1,3)*(A(:,2,1)*A(:,3,2)-A(:,2,2)*A(:,3,1))
@@ -495,13 +485,13 @@ MODULE SWE_PATCH_Solvers
             huLstar=uLstar*hLstar
             huRstar=uRstar*hRstar
             do mw=1,mwaves
-                where (lambda(:,mw).lt.0.d0)
+                where (lambda(:,mw).lt.0.0_GRID_SR)
                 hLstar= hLstar + beta(:,mw)*r(:,1,mw)
                 huLstar= huLstar + beta(:,mw)*r(:,2,mw)
                 end where
             enddo
             do mw=mwaves,1,-1
-                where (lambda(:,mw).gt.0.d0)
+                where (lambda(:,mw).gt.0.0_GRID_SR)
                 hRstar= hRstar - beta(:,mw)*r(:,1,mw)
                 huRstar= huRstar - beta(:,mw)*r(:,2,mw)
                 end where
@@ -510,14 +500,14 @@ MODULE SWE_PATCH_Solvers
             where (hLstar.gt.drytol) 
                 uLstar=huLstar/hLstar
             else where
-                hLstar=max(hLstar,0.d0)
-                uLstar=0.d0
+                hLstar=max(hLstar,0.0_GRID_SR)
+                uLstar=0.0_GRID_SR
             end where
             where (hRstar.gt.drytol) 
                 uRstar=huRstar/hRstar
             else where
-                hRstar=max(hRstar,0.d0)
-                uRstar=0.d0
+                hRstar=max(hRstar,0.0_GRID_SR)
+                uRstar=0.0_GRID_SR
             end where
 
         enddo ! end iteration on Riemann problem
