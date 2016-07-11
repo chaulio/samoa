@@ -367,6 +367,16 @@ module config
             else
                 _log_write(0, '(" SWE: Ascii Output: No")')
             end if
+            
+#           if defined(_SWE_PATCH)
+#               if defined(_SWE_USE_PATCH_SOLVER)
+                    _log_write(0, '(" SWE: Patches: Yes, order: ", I0, ", using patch solver: Yes")') _SWE_PATCH_ORDER
+#               else
+                    _log_write(0, '(" SWE: Patches: Yes, order: ", I0, ", using patch solver: No")') _SWE_PATCH_ORDER
+#               endif
+#           else
+                _log_write(0, '(" SWE: Patches: No")')
+#           endif
 
 #           if defined (_SWE_LF)
                _log_write(0, '(" SWE: Flux solver: ", A)') "Lax Friedrichs"

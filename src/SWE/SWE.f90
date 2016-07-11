@@ -225,7 +225,11 @@
 
                 if (rank_MPI == 0) then
                     !$omp master
-                    _log_write(1, "(A, I0, A, I0, A)") " SWE: ", i_initial_step, " adaptions, ", grid_info%i_cells, " cells"
+#                   if defined(_SWE_PATCH)
+                        _log_write(1, "(A, I0, A, I0, A, I0, A)") " SWE: ", i_initial_step, " adaptions, ", grid_info%i_cells, " patches = ", grid_info%i_cells * _SWE_PATCH_ORDER_SQUARE, " cells"
+#                   else
+                        _log_write(1, "(A, I0, A, I0, A)") " SWE: ", i_initial_step, " adaptions, ", grid_info%i_cells, " cells"
+#                   endif
                     !$omp end master
                 end if
 
@@ -307,7 +311,11 @@
 
                     if (rank_MPI == 0) then
                         !$omp master
-                        _log_write(1, '(A, I0, A, ES14.7, A, ES14.7, A, I0)') " SWE: EQ time step: ", i_time_step, ", sim. time:", grid%r_time, " s, dt:", grid%r_dt, " s, cells: ", grid_info%i_cells
+#                       if defined (_SWE_PATCH)
+                            _log_write(1, '(A, I0, A, ES14.7, A, ES14.7, A, I0, A, I0, A)') " SWE: EQ time step: ", i_time_step, ", sim. time:", grid%r_time, " s, dt:", grid%r_dt, " s, patches: ", grid_info%i_cells, " = ", grid_info%i_cells * _SWE_PATCH_ORDER_SQUARE, " cells"
+#                       else
+                            _log_write(1, '(A, I0, A, ES14.7, A, ES14.7, A, I0)') " SWE: EQ time step: ", i_time_step, ", sim. time:", grid%r_time, " s, dt:", grid%r_dt, " s, cells: ", grid_info%i_cells
+#                       endif
                         !$omp end master
                     end if
 
@@ -357,7 +365,11 @@
 				
                 if (rank_MPI == 0) then
                     !$omp master
-                    _log_write(1, '(A, I0, A, ES14.7, A, ES14.7, A, I0)') " SWE: time step: ", i_time_step, ", sim. time:", grid%r_time, " s, dt:", grid%r_dt, " s, cells: ", grid_info%i_cells
+#                   if defined(_SWE_PATCH)
+                        _log_write(1, '(A, I0, A, ES14.7, A, ES14.7, A, I0, A, I0, A)') " SWE: time step: ", i_time_step, ", sim. time:", grid%r_time, " s, dt:", grid%r_dt, " s, patches: ", grid_info%i_cells, " = ", grid_info%i_cells * _SWE_PATCH_ORDER_SQUARE, " cells"  
+#                   else
+                        _log_write(1, '(A, I0, A, ES14.7, A, ES14.7, A, I0)') " SWE: time step: ", i_time_step, ", sim. time:", grid%r_time, " s, dt:", grid%r_dt, " s, cells: ", grid_info%i_cells
+#                   endif
                     !$omp end master
                 end if
 
