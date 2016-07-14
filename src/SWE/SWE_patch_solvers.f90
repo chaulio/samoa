@@ -190,8 +190,10 @@ MODULE SWE_PATCH_Solvers
 			waveSpeeds(:,3) = 0.0_GRID_SR
 			upd_hL = 0.0_GRID_SR
 			upd_huL = 0.0_GRID_SR
+			upd_hvL = 0.0_GRID_SR
 			upd_hR = 0.0_GRID_SR
 			upd_huR = 0.0_GRID_SR
+			upd_hvR = 0.0_GRID_SR
 		end where
 
 		! compute maximum wave speed
