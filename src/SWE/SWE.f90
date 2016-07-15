@@ -233,7 +233,7 @@
                     !$omp end master
                 end if
 
-				if (swe%init%i_refinements_issued .le. grid_info%i_cells / 100_GRID_DI) then
+                if (swe%init%i_refinements_issued .le. grid_info%i_cells / 100_GRID_DI .or. i_initial_step => cfg%i_max_depth) then
 					exit
 				endif
 
