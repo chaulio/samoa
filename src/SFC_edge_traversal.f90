@@ -35,7 +35,7 @@ module SFC_edge_traversal
         end function
     end interface
 
-    integer :: i_steps_since_last_lb = 1
+    integer :: i_steps_since_last_lb = 0
     public i_steps_since_last_lb
     
 	contains
@@ -1355,12 +1355,15 @@ module SFC_edge_traversal
 
 	        _log_write(2, '(4X, "load balancing: imbalance above threshold? yes: ", F0.3, " > ", F0.3)') dble(i_max_load) * size_MPI / dble(i_total_load) - 1.0d0, r_max_imbalance
 
-	        !$omp single
-                i_steps_since_last_lb = i_steps_since_last_lb + 1
+            !$omp single
+                i_steps_since_last_lb = mod(i_steps_since_last_lb + 1, cfg%i_lb_frequency)
+                
+                my_load = sum(grid%sections%elements_alloc(:)%load)
+                _log_write(1, '(4X, "Rank ", I0, " has ", I0)'), rank_MPI, my_load
             !$omp end single
-
+	        
             ! check if LB should be performed now
-            if (mod(i_steps_since_last_lb, cfg%i_lb_frequency) .eq. 1) then
+            if (i_steps_since_last_lb .eq. 0) then
                 if (rank_MPI == 0) then
                     !$omp single
                     _log_write(1, '(4X, "Time for LB...")')
@@ -1370,7 +1373,7 @@ module SFC_edge_traversal
                 if (cfg%l_lb_hh) then
                     call compute_load_and_throughput(grid, my_load, my_throughput)
                     !$omp single
-                        _log_write(1, '(4X, "My load, my throughput, ratio: ", I0, F20.5, F20.5)') my_load, my_throughput, my_load/my_throughput
+                        !_log_write(1, '(4X, "My load, my throughput, ratio: ", I0, F20.5, F20.5)') my_load, my_throughput, my_load/my_throughput
                     !$omp end single
                     
                     !call compute_max_imbalance(my_throughput)
@@ -1392,6 +1395,8 @@ module SFC_edge_traversal
                 !do not perform any LB now!
                 l_early_exit = .true.
             end if
+            
+
             
             if (l_early_exit) then
                 return
@@ -2496,31 +2501,31 @@ module SFC_edge_traversal
                         end if
                     end if
                     max_imbalance = max_imbalance - 1 ! 0 = perfectly balanced
-                else
+                else if (cfg%i_lb_hh_ratio .ne. 0 .and. cfg%i_lb_hh_ratio .ne. 100) then
                     max_imbalance = 1 ! if this rank is empty, it is not balanced
                 end if
 
                 call reduce(max_imbalance, MPI_MAX)
                 
                 if (rank_MPI == 0) then
-                    _log_write(0, '(4X, "Max imbalance: ", F20.10)'), max_imbalance
+                    !_log_write(0, '(4X, "Max imbalance: ", F20.10)'), max_imbalance
                 end if
                 
                 !exit early if the imbalance is not big enough
                 if (max_imbalance .le. cfg%r_lb_hh_threshold) then
                     if (rank_MPI == 0) then
-                        _log_write(0, '(4X, "load balancing: max imbalance < ", F0.3, ", do nothing")') cfg%r_lb_hh_threshold
+                        _log_write(0, '(4X, "load balancing: max imbalance = ", F10.5 ," <= ", F0.3, ", do nothing")') max_imbalance, cfg%r_lb_hh_threshold
                     end if
                     l_early_exit = .true.
                 end if
                 
                 if (l_early_exit .ne. .true.) then
                     if (rank_MPI == 0) then
-                            _log_write(0, '(4X, "Performing LB...")')
+                            _log_write(0, '(4X, "Max Imbalance = ", F10.5, " > ", F0.3, ", performing LB...")') max_imbalance, cfg%r_lb_hh_threshold
                             ! integer/total load :
                             !_log_write(0, '(4X, "Before LB, load: ", I0, " ", I0, " ", I0)'), rank_load(0), rank_load(1), rank_load(2)
                             ! real/percentage:
-                            _log_write(0, '(4X, "Before LB, load: ", F10.7, " ", F10.7, " ", F10.7)'), dble(rank_load(0))/total_load, dble(rank_load(1))/total_load, dble(rank_load(2))/total_load
+                            _log_write(0, '(4X, "Before LB, load: ", F6.3, " ", F6.3, " ", F6.3)'), dble(rank_load(0))/total_load, dble(rank_load(1))/total_load, dble(rank_load(2))/total_load
                             !_log_write(0, '(4X, "Before LB, TP: ", F20.10, " ", F20.10, " ", F20.10)'), rank_throughput(0), rank_throughput(1), rank_throughput(2)
                         
                         ! assign each section to a rank according to the relative sections' loads and the ranks' throuhputs
@@ -2553,7 +2558,7 @@ module SFC_edge_traversal
                             rank_load(i) = rank_load(i) + all_load(j)
                         end do
                         !_log_write(0, '(4X, "After LB, load: ", I0, " ", I0, " ", I0)'), rank_load(0), rank_load(1), rank_load(2)
-                        _log_write(0, '(4X, "After LB, load: ", F10.7, " ", F10.7, " ", F10.7)'), dble(rank_load(0))/total_load, dble(rank_load(1))/total_load, dble(rank_load(2))/total_load
+                        _log_write(0, '(4X, "After LB, load: ", F6.3, " ", F6.3, " ", F6.3)'), dble(rank_load(0))/total_load, dble(rank_load(1))/total_load, dble(rank_load(2))/total_load
                     end if
                     
                     !scatter new section count
