@@ -1,6 +1,6 @@
-#if defined(_SWE_PATCH)
-
 #include "Compilation_control.f90"
+
+#if defined(_SWE_PATCH)
 
 MODULE SWE_PATCH_Solvers
 	use Samoa_swe
@@ -979,7 +979,366 @@ MODULE SWE_PATCH_Solvers
 		hv = transform_matrices(:,1,2) * temp + transform_matrices(:,2,2) * hv
 	end subroutine	
 
-
-
 END MODULE
+#endif
+
+
+#if defined(_SWE_HLLE) 
+
+MODULE SWE_HLLE
+    use Samoa_swe
+
+    contains
+
+    ! HLLE not vectorized - solves a single Riemann Problem
+    subroutine compute_updates_hlle_single(hL, hR, huL, huR, hvL, hVR, bL, bR, net_updatesL, net_updatesR, maxWaveSpeed)
+        real(kind = GRID_SR), intent(inout)  :: hL, hR, huL, huR, hvL, hvR, bL, bR
+        real(kind = GRID_SR), intent(inout)  :: net_updatesL(3), net_updatesR(3)
+        real(kind = GRID_SR), intent(inout)  :: maxWaveSpeed
+        
+        !local
+        integer                :: i, j
+        real(kind = GRID_SR)   :: uL, uR
+        real(kind = GRID_SR)   :: sqrt_hL, sqrt_hR, sqrt_ghL, sqrt_ghR
+        real(kind = GRID_SR)   :: half_g, sqrt_g
+        integer(kind = BYTE)   :: wetDryState
+        
+        real(kind = GRID_SR), dimension(2)       :: characteristicSpeeds, roeSpeeds, extEinfeldtSpeeds, steadyStateWave
+        real(kind = GRID_SR)                     :: hRoe, uRoe, sqrt_g_hRoe, hLLMiddleHeight, inverseDiff
+        real(kind = GRID_SR), dimension(3)       :: eigenValues, rightHandSide, beta
+        real(kind = GRID_SR), dimension(3,3)     :: eigenVectors
+        real(kind = GRID_SR), parameter          :: r_eps = 1e-7
+        
+        real(kind = GRID_SR), dimension(2,3)     :: fWaves
+        real(kind = GRID_SR), dimension(3)       :: waveSpeeds
+        
+        enum, bind(c) !constants to classify wet-dry-state of pairs of cells
+            enumerator :: DryDry = 0
+            enumerator :: WetWet = 1
+            enumerator :: WetDryInundation = 2
+            enumerator :: WetDryWall = 3
+            enumerator :: WetDryWallInundation = 4
+            enumerator :: DryWetInundation = 5
+            enumerator :: DryWetWall = 6
+            enumerator :: DryWetWallInundation = 7
+        end enum
+        
+        enum, bind(c) ! constants to classify Riemann state of a pair of cells:
+            enumerator :: DrySingleRarefaction = 0
+            enumerator :: SingleRarefactionDry = 1
+            enumerator :: ShockShock = 2
+            enumerator :: ShockRarefaction = 3
+            enumerator :: RarefactionShock = 4
+            enumerator :: RarefactionRarefaction = 5
+        end enum
+
+     
+        ! reset net updates
+        net_updatesL = 0.0_GRID_SR
+        net_updatesR = 0.0_GRID_SR
+        maxWaveSpeed = 0.0_GRID_SR
+        
+        ! declare variables which are used over and over again
+        half_g = 0.5_GRID_SR * g
+        sqrt_g = sqrt(g)
+        
+        !************************************************************************
+        !* Determine Wet Dry State Begin
+        !* (determine the wet/dry state and compute local variables correspondly)
+        !*************************************************************************
+        
+        ! compute speeds or set them to zero (dry cells)
+        if (hL >= cfg%dry_tolerance) then
+            uL = huL / hL
+        else
+            bL = bL + hL
+            hL = 0.0_GRID_SR
+            huL = 0.0_GRID_SR
+            uL = 0.0_GRID_SR  !is already zero
+        end if
+        
+        if (hR >= cfg%dry_tolerance) then
+            uR = huR / hR
+        else
+            bR = bR + hR
+            hR = 0.0_GRID_SR
+            huR = 0.0_GRID_SR
+            uR = 0_GRID_SR  !is already zero
+        end if
+        
+        
+        ! MB: determine wet/dry-state - try to start with most frequent case
+        if (hL >= cfg%dry_tolerance) then
+            if (hR >= cfg%dry_tolerance) then
+                ! simple wet/wet case - expected as most frequently executed branch
+                wetDryState = WetWet
+            else ! hL >= cfg%dry_tolerance .and. hR < cfg%dry_tolerance
+                ! we have a shoreline: left cell wet, right cell dry
+                ! => check for simple inundation problems
+                if (hL + bL > bR) then
+                    ! => dry cell lies lower than wet cell
+                    wetDryState = WetDryInundation
+                else ! hL >= cfg%dry_tolerance .and. hR < cfg%dry_tolerance .and. hL + bL <= bR
+                    ! => dry cell (right) lies higher than the wet cell (left)
+                    ! Removed middle state computation -> assuming momentum is never high enough to overcome boundary on its own
+                    hR = hL
+                    uR = -uL
+                    huR = -huL
+                    bR = 0.0_GRID_SR
+                    bL = 0.0_GRID_SR
+                    wetDryState = WetDryWall
+                end if
+            end if
+        else ! hL < cfg%dry_tolerance
+            if (hR >= cfg%dry_tolerance) then
+                ! we have a shoreline: left cell dry, right cell wet
+                ! => check for simple inundation problems
+                if (hR + bR > bL) then
+                    ! => dry cell lies lower than wet cell
+                    wetDryState = DryWetInundation
+                else ! hL < cfg%dry_tolerance .and. hR >= cfg%dry_tolerance .and. hR + bR <= bL
+                    ! => dry cell (left) lies higher than the wet cell (right)
+                    ! Removed middle state computation -> assuming momentum is never high enough to overcome boundary on its own
+                    hL = hR
+                    uL = -uR
+                    huL = -huR
+                    bL = 0.0_GRID_SR
+                    bR = 0.0_GRID_SR
+                    wetDryState = DryWetWall
+                end if
+            else ! hL < cfg%dry_tolerance .and. hR < cfg%dry_tolerance
+                wetDryState = DryDry
+                ! nothing to do for dry/dry case, all netUpdates and maxWaveSpeed are 0
+                return;
+            end if
+        end if
+
+        !************************************************************************
+        !* Determine Wet Dry State End
+        !*************************************************************************
+        
+
+        ! precompute some terms which are fixed during
+        ! the computation after some specific point
+        sqrt_hL = sqrt(hL)
+        sqrt_hR = sqrt(hR)
+        sqrt_ghR = sqrt_g * sqrt_hR
+        sqrt_ghL = sqrt_g * sqrt_hL
+        
+        !************************************************************************
+        !* Compute Wave Decomposition Begin
+        !************************************************************************
+        
+        ! compute eigenvalues of the jacobian matrices in states Q_{i-1} and Q_{i} (char. speeds)
+        characteristicSpeeds(1) = uL - sqrt_ghL
+        characteristicSpeeds(2) = uR + sqrt_ghR
+        
+        ! compute "Roe Speeds"
+        hRoe = 0.5_GRID_SR * (hR + hL)
+        uRoe = (uL * sqrt_hL + uR * sqrt_hR) / (sqrt_hL + sqrt_hR)
+        
+        ! optimization for dumb compilers
+        sqrt_g_hRoe = sqrt_g * sqrt(hRoe)
+        roeSpeeds(1) = uRoe - sqrt_g_hRoe
+        roeSpeeds(2) = uRoe + sqrt_g_hRoe
+
+        
+        ! middle state computation removed, using basic Einfeldt speeds
+        
+        extEinfeldtSpeeds = 0_GRID_SR
+        if (wetDryState == WetWet .or. wetDryState == WetDryWall .or. wetDryState == DryWetWall) then
+            extEinfeldtSpeeds(1) = min(characteristicSpeeds(1), roeSpeeds(1))
+            extEinfeldtSpeeds(2) = max(characteristicSpeeds(2), roeSpeeds(2))
+        else if (hL < cfg%dry_tolerance) then ! MB: !!! cases DryWetInundation, DryWetWallInundation
+            !ignore undefined speeds
+            extEinfeldtSpeeds(1) = roeSpeeds(1)
+            extEinfeldtSpeeds(2) = max(characteristicSpeeds(2), roeSpeeds(2))
+        else if (hR < cfg%dry_tolerance) then ! MB: !!! cases WetDryInundation, WetDryWallInuncation
+            ! ignore undefined speeds       
+            extEinfeldtSpeeds(1) = min(characteristicSpeeds(1), roeSpeeds(1))
+            extEinfeldtSpeeds(2) = roeSpeeds(2)
+        end if
+
+        
+        ! HLL middle state
+        !  \cite[theorem 3.1]{george2006finite}, \cite[ch. 4.1]{george2008augmented}
+        hLLMiddleHeight = max(0.0_GRID_SR, (huL - huR + extEinfeldtSpeeds(2) * hR - extEinfeldtSpeeds(1) * hL) / (extEinfeldtSpeeds(2) - extEinfeldtSpeeds(1)) )
+        
+        ! define eigenvalues
+        eigenvalues(1) = extEinfeldtSpeeds(1)
+        eigenvalues(2) = 0.5_GRID_SR * (extEinfeldtSpeeds(1) + extEinfeldtSpeeds(2))
+        eigenvalues(3) = extEinfeldtSpeeds(2)
+        
+        ! define eigenvectors
+        ! MB: no longer used as system matrix
+        !     -> but still used to compute f-waves
+        eigenVectors(1,1) = 1.0_GRID_SR
+        eigenVectors(2,1) = 0.0_GRID_SR
+        eigenVectors(3,1) = 1.0_GRID_SR
+        
+        eigenVectors(1,2) = eigenValues(1)
+        eigenVectors(2,2) = 0.0_GRID_SR
+        eigenVectors(3,2) = eigenValues(3)
+        
+        eigenVectors(1,3) = eigenValues(1) * eigenValues(1)
+        eigenVectors(2,3) = 1.0_GRID_SR
+        eigenVectors(3,3) = eigenValues(3) * eigenValues(3)
+        
+        ! compute the jump in state
+        rightHandSide(1) = hR - hL
+        rightHandSide(2) = huR - huL
+        rightHandSide(3) = (huR * uR + half_g * hR*hR) - (huL * uL + half_g * hL*hL)
+        
+        ! compute steady state wave
+        steadyStateWave(1) = -(bR - bL)
+        steadyStateWave(2) = -half_g * (hL + hR) * (bR - bL)
+
+        
+        ! preserve depth-positivity
+        !  \cite[ch. 6.5.2]{george2006finite}, \cite[ch. 4.2.3]{george2008augmented}
+        if (eigenvalues(1) < -r_eps .and. eigenvalues(3) > r_eps) then
+            ! subsonic
+            steadyStateWave(1) = max(steadyStateWave(1), hLLMiddleHeight * (eigenValues(3) - eigenValues(1)) / eigenValues(1))
+            steadyStateWave(1) = min(steadyStateWave(1), hLLMiddleHeight * (eigenValues(3) - eigenValues(1)) / eigenValues(3))
+        else if (eigenValues(1) > r_eps) then
+            ! supersonic right TODO: motivation?
+            steadyStateWave(1) = max(steadyStateWave(1), -hL)
+            steadyStateWave(1) = min(steadyStateWave(1), hLLMiddleHeight * (eigenValues(3) - eigenValues(1)) / eigenValues(1))
+        else if (eigenvalues(3) < -r_eps) then
+            ! supersonic left TODO: motivation?
+            steadyStateWave(1) = max(steadyStateWave(1), hLLMiddleHeight * (eigenValues(3) - eigenValues(1)) / eigenValues(3))
+            steadyStateWave(1) = min(steadyStateWave(1), hR)
+        end if
+        
+        ! Limit the effect of the source term
+        !   \cite[ch. 6.4.2]{george2006finite}
+        steadyStateWave(2) = min(steadyStateWave(2), g* max(-hL * (bR - bL), -hR * (bR - bL) ) ) !TODO: use extra array for precomputing delta_B?
+        steadyStateWave(2) = max(steadyStateWave(2), g* min(-hL * (bR - bL), -hR * (bR - bL) ) )
+        
+        rightHandSide(1) = rightHandSide(1) - steadyStateWave(1)
+        !rightHandSide(:,2): no source term
+        rightHandSide(3) = rightHandSide(3) - steadyStateWave(2)
+
+        
+        ! everything is ready, solve the equations!
+        !************************************************************************
+        !* Solve linear equation begin
+        !************************************************************************
+        
+        ! direct solution of specific 3x3 system:
+        ! (       1           0       1           ) ( beta[0] ) = ( rightHandSide[0] )
+        ! ( eigenValues[0]    0  eigenValues[2]   ) ( beta[1] )   ( rightHandSide[1] )
+        ! ( eigenValues[0]^2  1  eigenValues[2]^2 ) ( beta[2] )   ( rightHandSide[2] )
+        
+        ! step 1: solve the following 2x2 system (1st and 3rd column):
+        ! (       1              1           ) ( beta[0] ) = ( rightHandSide[0] )
+        ! ( eigenValues[0]  eigenValues[2]   ) ( beta[2] )   ( rightHandSide[1] )
+
+        ! compute the inverse of the wave speed difference:
+        inverseDiff = 1.0_GRID_SR / (eigenValues(3) - eigenValues(1))
+        ! compute f-waves:
+        beta(1) = (  eigenValues(3) * rightHandSide(1) - rightHandSide(2) ) * inverseDiff
+        beta(3) = ( -eigenValues(1) * rightHandSide(1) + rightHandSide(2) ) * inverseDiff
+        
+        ! step 2: solve 3rd row for beta[1]:
+        beta(2) = rightHandSide(3) - eigenValues(1)*eigenValues(1) * beta(1) - eigenValues(3)*eigenValues(3) * beta(3)
+        !************************************************************************
+        !* Solve linear equation end
+        !************************************************************************
+        
+        ! initialize all fWaves and waveSpeeds to zero, so we don't need to set some of them to zero afterwards
+        ! (see commented code below)
+        fWaves = 0.0_GRID_SR
+        waveSpeeds = 0.0_GRID_SR
+        
+        ! compute f-waves and wave-speeds
+        if (wetDryState == WetDryWall) then
+            ! zero ghost updates (wall boundary)
+            ! care about the left going wave (0) only
+            fWaves(1,1) = beta(1) * eigenVectors(1,2)
+            fWaves(2,1) = beta(1) * eigenVectors(1,3)
+            
+            ! set the rest to zero
+            !fWaves(1,2) = 0.0_GRID_SR   !is already zero
+            !fWaves(2,2) = 0.0_GRID_SR   !is already zero
+            !fwaves(1,3) = 0.0_GRID_SR   !is already zero
+            !fwaves(2,3) = 0.0_GRID_SR   !is already zero
+            
+            waveSpeeds(1) = eigenValues(1)
+            !waveSpeeds(2) = 0.0_GRID_SR   !is already zero
+            !waveSpeeds(3) = 0.0_GRID_SR   !is already zero
+        
+        else if (wetDryState == DryWetWall) then
+            ! zero ghost updates (wall boundary)
+            ! care about the right going wave (2) only
+            fWaves(1,3) = beta(3) * eigenVectors(3,2)
+            fWaves(2,3) = beta(3) * eigenVectors(3,3)
+            
+            ! set the rest to zero
+            !fWaves(1,1) = 0.0_GRID_SR   !is already zero
+            !fWaves(2,1) = 0.0_GRID_SR   !is already zero
+            !fwaves(1,2) = 0.0_GRID_SR   !is already zero
+            !fwaves(2,2) = 0.0_GRID_SR   !is already zero
+            
+            !waveSpeeds(1) = 0.0_GRID_SR   !is already zero
+            !waveSpeeds(2) = 0.0_GRID_SR   !is already zero
+            waveSpeeds(3) = eigenValues(3)
+            
+        else 
+            ! compute f-waves (default)
+            !do i=1,3
+            !   fWaves(1,i) = beta(i) * eigenVectors(i,2)
+            !   fWaves(2,i) = beta(i) * eigenVectors(i,3)
+            !end do
+            ! loop unrolled:
+            fWaves(1,1) = beta(1) * eigenVectors(1,2)
+            fWaves(2,1) = beta(1) * eigenVectors(1,3)
+
+            fWaves(1,2) = beta(2) * eigenVectors(2,2)
+            fWaves(2,2) = beta(2) * eigenVectors(2,3)
+
+            fWaves(1,3) = beta(3) * eigenVectors(3,2)
+            fWaves(2,3) = beta(3) * eigenVectors(3,3)
+            
+            waveSpeeds(1) = eigenValues(1)
+            waveSpeeds(2) = eigenValues(2)
+            waveSpeeds(3) = eigenValues(3)
+        end if
+        
+        !************************************************************************
+        !* Compute Wave Decomposition End
+        !************************************************************************
+        
+
+        ! compute the updates from the three propagating waves
+        ! A^-\delta Q = \sum{s[i]<0} \beta[i] * r[i] = A^-\delta Q = \sum{s[i]<0} Z^i
+        ! A^+\delta Q = \sum{s[i]>0} \beta[i] * r[i] = A^-\delta Q = \sum{s[i]<0} Z^i
+        do i=1,3
+            if (waveSpeeds(i) < -r_eps) then
+                ! left going
+                net_updatesL(1) = net_updatesL(1) + fWaves(1,i)
+                net_updatesL(2) = net_updatesL(2) + fWaves(2,i)
+            else if (waveSpeeds(i) > r_eps) then
+                ! right going
+                net_updatesR(1) = net_updatesR(1) + fWaves(1,i)
+                net_updatesR(2) = net_updatesR(2) + fWaves(2,i)
+            else
+                ! TODO: this case should not happen mathematically, but it does. Where is the bug? Machine accuracy only?
+                ! MB: >>> waveSpeeds set to 0 for cases WetDryWall and DryWetWall 
+                net_updatesL(1) = net_updatesL(1) + 0.5_GRID_SR * fWaves(1,i)
+                net_updatesL(2) = net_updatesL(2) + 0.5_GRID_SR * fWaves(2,i)
+                
+                net_updatesR(1) = net_updatesR(1) + 0.5_GRID_SR * fWaves(1,i)
+                net_updatesR(2) = net_updatesR(2) + 0.5_GRID_SR * fWaves(2,i)
+            end if
+        end do
+        
+        ! compute maximum wave speed (-> CFL-condition)
+        maxWaveSpeed = maxVal(abs(waveSpeeds(:)))
+
+      
+    end subroutine
+
+end module
+    
 #endif
