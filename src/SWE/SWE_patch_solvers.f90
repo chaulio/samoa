@@ -139,9 +139,9 @@ MODULE SWE_PATCH_Solvers
 		!*******************
 
 #       if defined(_SWE_FWAVE)
-            call riemann_fwave_simd(hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,sE1,sE2,cfg%dry_tolerance,g,waveSpeeds,fWaves)
+            call riemann_fwave_simd(hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,sE1,sE2,waveSpeeds,fWaves)
 #       elif defined(_SWE_AUG_RIEMANN)
-            call riemann_augrie_simd(1,hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,sE1,sE2,cfg%dry_tolerance,g,waveSpeeds,fWaves)
+            call riemann_augrie_simd(1,hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,sE1,sE2,waveSpeeds,fWaves)
 #       endif
 		!*****************
 		!* end of solver *
@@ -206,7 +206,7 @@ MODULE SWE_PATCH_Solvers
 		
 	end subroutine
 	
-	subroutine riemann_fwave_simd(hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,s1,s2,drytol,g,sw,fw)
+	subroutine riemann_fwave_simd(hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,s1,s2,sw,fw)
         
         ! --> implementation with vectorization on patches
       
@@ -219,7 +219,6 @@ MODULE SWE_PATCH_Solvers
         !input
         real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout) :: hL,hR,huL,huR,bL,bR,uL,uR,delphi,s1,s2
         real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout) :: hvL,hvR,vL,vR
-        real(kind = GRID_SR), intent(in) :: drytol,g
 
         real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3), intent(inout) ::  sw
         real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3,3), intent(inout) ::  fw
@@ -261,7 +260,7 @@ MODULE SWE_PATCH_Solvers
         fw(:,3,2) = huR*vR - huL*vL -fw(:,3,1)-fw(:,3,3)
 	end subroutine
 	
-	subroutine riemann_augrie_simd(maxiter,hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,sE1,sE2,drytol,g,sw,fw)
+	subroutine riemann_augrie_simd(maxiter,hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,sE1,sE2,sw,fw)
         
         ! --> implementation with vectorization on patches
       
@@ -285,7 +284,6 @@ MODULE SWE_PATCH_Solvers
         real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3), intent(inout) :: sw
         real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout) :: hL,hR,huL,huR,bL,bR,uL,uR,delphi,sE1,sE2
         real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout) :: hvL,hvR,vL,vR
-        real(kind = GRID_SR) :: drytol, g
 
         !local
         integer, parameter :: mwaves = 3, meqn = 3
@@ -325,7 +323,11 @@ MODULE SWE_PATCH_Solvers
         delnorm = delh**2 + delphi**2
 
         do i=1,_SWE_PATCH_NUM_EDGES
-            call riemanntype(hL(i),hR(i),uL(i),uR(i),hm(i),s1m(i),s2m(i),rare1(i),rare2(i),1,drytol,g)
+#           if defined(_SINGLE_PRECISION)
+                call riemanntype_sp(hL(i), hR(i), uL(i), uR(i), hm(i), s1m(i), s2m(i), rare1(i), rare2(i), 1, cfg%dry_tolerance, g)
+#           elif defined(_DOUBLE_PRECISION)
+                call riemanntype(hL(i), hR(i), uL(i), uR(i), hm(i), s1m(i), s2m(i), rare1(i), rare2(i), 1, cfg%dry_tolerance, g)
+#           endif
         end do
 
         lambda(:,1)= min(sE1,s2m) !Modified Einfeldt speed
@@ -361,7 +363,7 @@ MODULE SWE_PATCH_Solvers
             where (hstarHLL.lt.min(hL,hR)*0.2_GRID_SR) rarecorrector=.false.
         end where
         
-        where (dabs(lambda(:,2)) .lt. 1.e-20_GRID_SR) lambda(:,2) = 0.0_GRID_SR
+        where (abs(lambda(:,2)) .lt. 1.e-20_GRID_SR) lambda(:,2) = 0.0_GRID_SR
         
         do mw=1,mwaves
             r(:,1,mw)=1.0_GRID_SR
@@ -372,7 +374,7 @@ MODULE SWE_PATCH_Solvers
         where (.not.rarecorrector)
             lambda(:,2) = 0.5_GRID_SR*(lambda(:,1)+lambda(:,3))
             lambda(:,2) = max(min(0.5_GRID_SR*(s1m+s2m),sE2),sE1)
-            where (dabs(lambda(:,2)) .lt. 1.d-20) lambda(:,2) = 0.0_GRID_SR
+            where (abs(lambda(:,2)) .lt. 1.d-20) lambda(:,2) = 0.0_GRID_SR
             r(:,1,2)=0.0_GRID_SR
             r(:,2,2)=0.0_GRID_SR
             r(:,3,2)=1.0_GRID_SR
@@ -396,7 +398,7 @@ MODULE SWE_PATCH_Solvers
         convergencetol=1.e-6_GRID_SR
         do iter=1,maxiter
             !determine steady state wave (this will be subtracted from the delta vectors)
-            where (min(hLstar,hRstar).lt.drytol.and.rarecorrector)
+            where (min(hLstar,hRstar).lt.cfg%dry_tolerance.and.rarecorrector)
                 rarecorrector=.false.
                 hLstar=hL
                 hRstar=hR
@@ -406,7 +408,7 @@ MODULE SWE_PATCH_Solvers
                 huRstar=uRstar*hRstar
                 lambda(:,2) = 0.5_GRID_SR*(lambda(:,1)+lambda(:,3))
                 lambda(:,2) = max(min(0.5_GRID_SR*(s1m+s2m),sE2),sE1)
-                where (dabs(lambda(:,2)) .lt. 1.0_GRID_SR) lambda(:,2) = 0.0_GRID_SR
+                where (abs(lambda(:,2)) .lt. 1.0_GRID_SR) lambda(:,2) = 0.0_GRID_SR
                 r(:,1,2)=0.0_GRID_SR
                 r(:,2,2)=0.0_GRID_SR
                 r(:,3,2)=1.0_GRID_SR
@@ -499,13 +501,13 @@ MODULE SWE_PATCH_Solvers
                 end where
             enddo
 
-            where (hLstar.gt.drytol) 
+            where (hLstar.gt.cfg%dry_tolerance) 
                 uLstar=huLstar/hLstar
             else where
                 hLstar=max(hLstar,0.0_GRID_SR)
                 uLstar=0.0_GRID_SR
             end where
-            where (hRstar.gt.drytol) 
+            where (hRstar.gt.cfg%dry_tolerance) 
                 uRstar=huRstar/hRstar
             else where
                 hRstar=max(hRstar,0.0_GRID_SR)
