@@ -8,205 +8,206 @@ MODULE SWE_PATCH_Solvers
 	
 	contains
 
-	subroutine compute_updates_simd(transform_matrices, hL, huL, hvL, bL, hR, huR, hvR, bR,upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR, maxWaveSpeed)
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,2,2), intent(in)	:: transform_matrices
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout)	:: hL, hR, huL, huR, hvL, hvR, bL, bR
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(out)	:: upd_hL, upd_hR, upd_huL, upd_huR, upd_hvL, upd_hvR
-		real(kind = GRID_SR), intent(inout)									:: maxWaveSpeed
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT)				:: uL, uR, vL, vR
-		
-		!local
-		integer								:: i, j
-		real(kind = GRID_SR)										:: hstar, s1m, s2m
-		logical														:: rare1, rare2
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3)		:: waveSpeeds
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3,3)	:: fwaves
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3)		:: wall
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT)		:: delphi
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT)		:: sL, sR, uhat, chat, sRoe1, sRoe2, sE1, sE2
+    subroutine compute_updates_simd(transform_matrices, hL, huL, hvL, bL, hR, huR, hvR, bR,upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR, maxWaveSpeed)
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,2,2), intent(in) :: transform_matrices
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE), intent(inout)  :: hL, hR, huL, huR, hvL, hvR, bL, bR
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE), intent(out)    :: upd_hL, upd_hR, upd_huL, upd_huR, upd_hvL, upd_hvR
+        real(kind = GRID_SR), intent(inout)                                 :: maxWaveSpeed
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE)             :: uL, uR, vL, vR
+        
+        !local
+        integer                             :: i, j
+        real(kind = GRID_SR)                                        :: hstar, s1m, s2m
+        logical                                                     :: rare1, rare2
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,3)       :: waveSpeeds
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,3,3) :: fwaves
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,3)       :: wall
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE)     :: delphi
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE)     :: sL, sR, uhat, chat, sRoe1, sRoe2, sE1, sE2
 
-		!DIR$ ASSUME_ALIGNED transform_matrices: 64
-		!DIR$ ASSUME_ALIGNED hL:64, hR:64, huL:64, huR:64, hvL:64, hvR:64, bL:64, bR: 64
+        !DIR$ ASSUME_ALIGNED transform_matrices: 64
+        !DIR$ ASSUME_ALIGNED hL:64, hR:64, huL:64, huR:64, hvL:64, hvR:64, bL:64, bR: 64
         !DIR$ ASSUME_ALIGNED upd_hL:64, upd_hR:64, upd_huL:64, upd_huR:64, upd_hvL:64, upd_hvR: 64
         !DIR$ ASSUME_ALIGNED uL:64, uR:64, vL:64, vR: 64
         
         !DIR$ ASSUME_ALIGNED waveSpeeds: 64
-		!DIR$ ASSUME_ALIGNED fwaves: 64
-		!DIR$ ASSUME_ALIGNED wall: 64
-		!DIR$ ASSUME_ALIGNED delphi: 64
-		!DIR$ ASSUME_ALIGNED sL:64, sR:64, uhat:64, chat:64, sRoe1:64, sRoe2:64, sE1:64, sE2: 64
+        !DIR$ ASSUME_ALIGNED fwaves: 64
+        !DIR$ ASSUME_ALIGNED wall: 64
+        !DIR$ ASSUME_ALIGNED delphi: 64
+        !DIR$ ASSUME_ALIGNED sL:64, sR:64, uhat:64, chat:64, sRoe1:64, sRoe2:64, sE1:64, sE2: 64
 
 
 
-		! *** F-Wave/AugRie solvers *** (based on geoclaw implementation)
+        ! *** F-Wave/AugRie solvers *** (based on geoclaw implementation)
         
-		!samoa considers bathymetry included in h, the solver doesn't
-		hL = hL - bL
-		hR = hR - bR
+        !samoa considers bathymetry included in h, the solver doesn't
+        hL = hL - bL
+        hR = hR - bR
 
-		! change base so hu/hv become ortogonal/perperdicular to edge
-		call apply_transformations_before(transform_matrices, huL, hvL)
-		call apply_transformations_before(transform_matrices, huR, hvR)
-		
-		! initialize Riemann problem for grid interfaces
-		waveSpeeds=0.0_GRID_SR
-		fWaves=0.0_GRID_SR
-		
-		! check for wet/dry boundary
-		where (hR > cfg%dry_tolerance) 
-			uR = huR / hR
-			vR = hvR / hR
-		elsewhere
-			hR = 0.0_GRID_SR
-			huR = 0.0_GRID_SR
-			hvR = 0.0_GRID_SR
-			uR = 0.0_GRID_SR
-			vR = 0.0_GRID_SR
-		end where
-		
-		where (hL > cfg%dry_tolerance)
-			uL = huL / hL
-			vL = hvL / hL
-		elsewhere
-			hL = 0.0_GRID_SR
-			huL = 0.0_GRID_SR
-			hvL = 0.0_GRID_SR
-			uL = 0.0_GRID_SR
-			vL = 0.0_GRID_SR
-		end where
-		
-		! per default there is no wall
-		wall = 1.0_GRID_SR
-		do i=1,_SWE_PATCH_NUM_EDGES
-			if (hR(i) <= cfg%dry_tolerance) then
-#				if defined(_SINGLE_PRECISION)
-					call riemanntype_sp(hL(i), hL(i), uL(i), -uL(i), hstar, s1m, s2m, rare1, rare2, 1, cfg%dry_tolerance, g)
-#				elif defined(_DOUBLE_PRECISION)
-					call riemanntype(hL(i), hL(i), uL(i), -uL(i), hstar, s1m, s2m, rare1, rare2, 1, cfg%dry_tolerance, g)
-#				endif
-				hstar = max(hL(i), hstar)
-				if (hstar + bL(i) < bR(i)) then !right state should become ghost values that mirror left for wall problem
-					wall(i,2) = 0.0_GRID_SR
-					wall(i,3) = 0.0_GRID_SR
-					hR(i) = hL(i)
-					huR(i) = - huL(i)
-					bR(i) = bL(i)
-					uR(i) = -uL(i)
-					vR(i) = vL(i)
-				else if (hL(i) + bL(i) < bR(i)) then
-					bR(i) = hL(i)+bL(i)
-				end if
-			else if (hL(i) <= cfg%dry_tolerance) then ! right surface is lower than left topo
-#				if defined(_SINGLE_PRECISION)
-					call riemanntype_sp(hR(i), hR(i), -uR(i), uR(i), hstar, s1m, s2m, rare1, rare2, 1, cfg%dry_tolerance, g)
-#				elif defined(_DOUBLE_PRECISION)
-					call riemanntype(hR(i), hR(i), -uR(i), uR(i), hstar, s1m, s2m, rare1, rare2, 1, cfg%dry_tolerance, g)
-#				endif
-				hstar = max (hR(i), hstar)
-				if (hstar + bR(i) < bL(i)) then !left state should become ghost values that mirror right
-					wall(i,1) = 0.0_GRID_SR
-					wall(i,2) = 0.0_GRID_SR
-					hL(i) = hR(i)
-					huL(i) = -huR(i)
-					bL(i) = bR(i)
-					uL(i) = -uR(i)
-					vL(i) = vR(i)
-				else if (hR(i) + bR(i) < bL(i)) then
-					bL(i) = hR(i) + bR(i)
-				end if
-			end if
-		end do
-		
-		! BUGFIX:
-		! Problem: loss of significance may occur in phiR-phiL, causing divergence of the steady state.
-		! Action:  Compute delphi=phiR-phiL explicitly. delphi is arithmetically equivalent to phiR-phiL, but with far smaller numerical loss.
-		delphi = (huR - huL)*(uL + uR) - uL*uR*(hR-hL) + (0.5_GRID_SR * g *(bR +hR - bL - hL)*(hR + hL)) - 0.5_GRID_SR*g*(hR + hL)*(bR - bL)
-		
-		! determine wave speeds
-		sL=uL-sqrt(g*hL) ! 1 wave speed of left state
-		sR=uR+sqrt(g*hR) ! 2 wave speed of right state
+        ! change base so hu/hv become ortogonal/perperdicular to edge
+        call apply_transformations_before(transform_matrices, huL, hvL)
+        call apply_transformations_before(transform_matrices, huR, hvR)
+        
+        ! initialize Riemann problem for grid interfaces
+        waveSpeeds=0.0_GRID_SR
+        fWaves=0.0_GRID_SR
+        
+        ! check for wet/dry boundary
+        where (hR > cfg%dry_tolerance) 
+            uR = huR / hR
+            vR = hvR / hR
+        elsewhere
+            hR = 0.0_GRID_SR
+            huR = 0.0_GRID_SR
+            hvR = 0.0_GRID_SR
+            uR = 0.0_GRID_SR
+            vR = 0.0_GRID_SR
+        end where
+        
+        where (hL > cfg%dry_tolerance)
+            uL = huL / hL
+            vL = hvL / hL
+        elsewhere
+            hL = 0.0_GRID_SR
+            huL = 0.0_GRID_SR
+            hvL = 0.0_GRID_SR
+            uL = 0.0_GRID_SR
+            vL = 0.0_GRID_SR
+        end where
+        
+        ! per default there is no wall
+        wall = 1.0_GRID_SR
+        do i=1,_SWE_PATCH_SOLVER_CHUNK_SIZE
+            if (hR(i) <= cfg%dry_tolerance) then
+#               if defined(_SINGLE_PRECISION)
+                    call riemanntype_sp(hL(i), hL(i), uL(i), -uL(i), hstar, s1m, s2m, rare1, rare2, 1, cfg%dry_tolerance, g)
+#               elif defined(_DOUBLE_PRECISION)
+                    call riemanntype(hL(i), hL(i), uL(i), -uL(i), hstar, s1m, s2m, rare1, rare2, 1, cfg%dry_tolerance, g)
+#               endif
+                hstar = max(hL(i), hstar)
+                if (hstar + bL(i) < bR(i)) then !right state should become ghost values that mirror left for wall problem
+                    wall(i,2) = 0.0_GRID_SR
+                    wall(i,3) = 0.0_GRID_SR
+                    hR(i) = hL(i)
+                    huR(i) = - huL(i)
+                    bR(i) = bL(i)
+                    uR(i) = -uL(i)
+                    vR(i) = vL(i)
+                else if (hL(i) + bL(i) < bR(i)) then
+                    bR(i) = hL(i)+bL(i)
+                end if
+            else if (hL(i) <= cfg%dry_tolerance) then ! right surface is lower than left topo
+#               if defined(_SINGLE_PRECISION)
+                    call riemanntype_sp(hR(i), hR(i), -uR(i), uR(i), hstar, s1m, s2m, rare1, rare2, 1, cfg%dry_tolerance, g)
+#               elif defined(_DOUBLE_PRECISION)
+                    call riemanntype(hR(i), hR(i), -uR(i), uR(i), hstar, s1m, s2m, rare1, rare2, 1, cfg%dry_tolerance, g)
+#               endif
+                hstar = max (hR(i), hstar)
+                if (hstar + bR(i) < bL(i)) then !left state should become ghost values that mirror right
+                    wall(i,1) = 0.0_GRID_SR
+                    wall(i,2) = 0.0_GRID_SR
+                    hL(i) = hR(i)
+                    huL(i) = -huR(i)
+                    bL(i) = bR(i)
+                    uL(i) = -uR(i)
+                    vL(i) = vR(i)
+                else if (hR(i) + bR(i) < bL(i)) then
+                    bL(i) = hR(i) + bR(i)
+                end if
+            end if
+        end do
+        
+        ! BUGFIX:
+        ! Problem: loss of significance may occur in phiR-phiL, causing divergence of the steady state.
+        ! Action:  Compute delphi=phiR-phiL explicitly. delphi is arithmetically equivalent to phiR-phiL, but with far smaller numerical loss.
+        delphi = (huR - huL)*(uL + uR) - uL*uR*(hR-hL) + (0.5_GRID_SR * g *(bR +hR - bL - hL)*(hR + hL)) - 0.5_GRID_SR*g*(hR + hL)*(bR - bL)
+        
+        ! determine wave speeds
+        sL=uL-sqrt(g*hL) ! 1 wave speed of left state
+        sR=uR+sqrt(g*hR) ! 2 wave speed of right state
 
-		uhat=(sqrt(g*hL)*uL + sqrt(g*hR)*uR)/(sqrt(g*hR)+sqrt(g*hL)) ! Roe average
-		chat=sqrt(g*0.5_GRID_SR*(hR+hL)) ! Roe average
-		sRoe1=uhat-chat ! Roe wave speed 1 wave
-		sRoe2=uhat+chat ! Roe wave speed 2 wave
+        uhat=(sqrt(g*hL)*uL + sqrt(g*hR)*uR)/(sqrt(g*hR)+sqrt(g*hL)) ! Roe average
+        chat=sqrt(g*0.5_GRID_SR*(hR+hL)) ! Roe average
+        sRoe1=uhat-chat ! Roe wave speed 1 wave
+        sRoe2=uhat+chat ! Roe wave speed 2 wave
 
-		sE1 = min(sL,sRoe1) ! Eindfeldt speed 1 wave
-		sE2 = max(sR,sRoe2) ! Eindfeldt speed 2 wave
-		
-		!*******************
-		!* call the solver *
-		!*******************
+        sE1 = min(sL,sRoe1) ! Eindfeldt speed 1 wave
+        sE2 = max(sR,sRoe2) ! Eindfeldt speed 2 wave
+        
+        !*******************
+        !* call the solver *
+        !*******************
 
 #       if defined(_SWE_FWAVE)
             call riemann_fwave_simd(hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,sE1,sE2,waveSpeeds,fWaves)
 #       elif defined(_SWE_AUG_RIEMANN)
             call riemann_augrie_simd(1,hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,sE1,sE2,waveSpeeds,fWaves)
 #       endif
-		!*****************
-		!* end of solver *
-		!*****************
+        !*****************
+        !* end of solver *
+        !*****************
 
-		! eliminate ghost fluxes for wall
-		do i=1, 3 !waveNumber
-			waveSpeeds(:,i) = waveSpeeds(:,i) * wall(:,i)
-			do j=1,3 !equationNumber
-				fwaves(:,j,i) = fwaves(:,j,i) * wall(:,i)
-			end do
-		end do
-		
-		! compute net updates
-		upd_hL = 0.0_GRID_SR
-		upd_huL = 0.0_GRID_SR
-		upd_hvL = 0.0_GRID_SR
-		upd_hR = 0.0_GRID_SR
-		upd_huR = 0.0_GRID_SR
-		upd_hvR = 0.0_GRID_SR
-		
-		do i=1,3 ! waveNumber
-			where (waveSpeeds(:,i) < 0)
-				upd_hL = upd_hL + fwaves(:,1,i)
-				upd_huL = upd_huL + fwaves(:,2,i)
-				upd_hvL = upd_hvL + fwaves(:,3,i)
-			elsewhere (waveSpeeds(:,i) > 0)
-				upd_hR = upd_hR + fwaves(:,1,i)
-				upd_huR = upd_huR + fwaves(:,2,i)
-				upd_hvR = upd_hvR + fwaves(:,3,i)
-			elsewhere
-				upd_hL = upd_hL + 0.5_GRID_SR * fwaves(:,1,i)
-				upd_huL = upd_huL + 0.5_GRID_SR * fwaves(:,2,i)
-				upd_hvL = upd_hvL + 0.5_GRID_SR * fwaves(:,3,i)
-				upd_hR = upd_hR + 0.5_GRID_SR * fwaves(:,1,i)
-				upd_huR = upd_huR + 0.5_GRID_SR * fwaves(:,2,i)
-				upd_hvR = upd_hvR + 0.5_GRID_SR * fwaves(:,3,i)
-			end where
-		end do
-		
-		! no net updates in DryDry case -> a non-vectorized solver would have stopped the computation
-		! right after checking wet/dry boundary
-		where (hL < cfg%dry_tolerance .and. hR < cfg%dry_tolerance)
-			waveSpeeds(:,1) = 0.0_GRID_SR
-			waveSpeeds(:,2) = 0.0_GRID_SR
-			waveSpeeds(:,3) = 0.0_GRID_SR
-			upd_hL = 0.0_GRID_SR
-			upd_huL = 0.0_GRID_SR
-			upd_hvL = 0.0_GRID_SR
-			upd_hR = 0.0_GRID_SR
-			upd_huR = 0.0_GRID_SR
-			upd_hvR = 0.0_GRID_SR
-		end where
+        ! eliminate ghost fluxes for wall
+        do i=1, 3 !waveNumber
+            waveSpeeds(:,i) = waveSpeeds(:,i) * wall(:,i)
+            do j=1,3 !equationNumber
+                fwaves(:,j,i) = fwaves(:,j,i) * wall(:,i)
+            end do
+        end do
+        
+        ! compute net updates
+        upd_hL = 0.0_GRID_SR
+        upd_huL = 0.0_GRID_SR
+        upd_hvL = 0.0_GRID_SR
+        upd_hR = 0.0_GRID_SR
+        upd_huR = 0.0_GRID_SR
+        upd_hvR = 0.0_GRID_SR
+        
+        do i=1,3 ! waveNumber
+            where (waveSpeeds(:,i) < 0)
+                upd_hL = upd_hL + fwaves(:,1,i)
+                upd_huL = upd_huL + fwaves(:,2,i)
+                upd_hvL = upd_hvL + fwaves(:,3,i)
+            elsewhere (waveSpeeds(:,i) > 0)
+                upd_hR = upd_hR + fwaves(:,1,i)
+                upd_huR = upd_huR + fwaves(:,2,i)
+                upd_hvR = upd_hvR + fwaves(:,3,i)
+            elsewhere
+                upd_hL = upd_hL + 0.5_GRID_SR * fwaves(:,1,i)
+                upd_huL = upd_huL + 0.5_GRID_SR * fwaves(:,2,i)
+                upd_hvL = upd_hvL + 0.5_GRID_SR * fwaves(:,3,i)
+                upd_hR = upd_hR + 0.5_GRID_SR * fwaves(:,1,i)
+                upd_huR = upd_huR + 0.5_GRID_SR * fwaves(:,2,i)
+                upd_hvR = upd_hvR + 0.5_GRID_SR * fwaves(:,3,i)
+            end where
+        end do
+        
+        ! no net updates in DryDry case -> a non-vectorized solver would have stopped the computation
+        ! right after checking wet/dry boundary
+        where (hL < cfg%dry_tolerance .and. hR < cfg%dry_tolerance)
+            waveSpeeds(:,1) = 0.0_GRID_SR
+            waveSpeeds(:,2) = 0.0_GRID_SR
+            waveSpeeds(:,3) = 0.0_GRID_SR
+            upd_hL = 0.0_GRID_SR
+            upd_huL = 0.0_GRID_SR
+            upd_hvL = 0.0_GRID_SR
+            upd_hR = 0.0_GRID_SR
+            upd_huR = 0.0_GRID_SR
+            upd_hvR = 0.0_GRID_SR
+        end where
 
-		! compute maximum wave speed
-		maxWaveSpeed = maxVal(abs(waveSpeeds(1:_SWE_PATCH_NUM_EDGES,:)))
-		
-		
-		! inverse transformations
-		call apply_transformations_after(transform_matrices, upd_huL, upd_hvL)
-		call apply_transformations_after(transform_matrices, upd_huR, upd_hvR)
-		
-	end subroutine
+        ! compute maximum wave speed
+        maxWaveSpeed = max(maxWaveSpeed, maxVal(abs(waveSpeeds(1:_SWE_PATCH_SOLVER_CHUNK_SIZE,:))))
+        
+        
+        ! inverse transformations
+        call apply_transformations_after(transform_matrices, upd_huL, upd_hvL)
+        call apply_transformations_after(transform_matrices, upd_huR, upd_hvR)
+        
+    end subroutine
 	
-	subroutine riemann_fwave_simd(hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,s1,s2,sw,fw)
+	
+    subroutine riemann_fwave_simd(hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,s1,s2,sw,fw)
         
         ! --> implementation with vectorization on patches
       
@@ -217,14 +218,14 @@ MODULE SWE_PATCH_Solvers
         implicit none
 
         !input
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout) :: hL,hR,huL,huR,bL,bR,uL,uR,delphi,s1,s2
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout) :: hvL,hvR,vL,vR
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE), intent(inout) :: hL,hR,huL,huR,bL,bR,uL,uR,delphi,s1,s2
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE), intent(inout) :: hvL,hvR,vL,vR
 
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3), intent(inout) ::  sw
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3,3), intent(inout) ::  fw
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,3), intent(inout) ::  sw
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,3,3), intent(inout) ::  fw
 
         !local
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: delh, delhu, delb, deldelphi, delphidecomp, beta1, beta2
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: delh, delhu, delb, deldelphi, delphidecomp, beta1, beta2
 
 
         !DIR$ ASSUME_ALIGNED hL:64, hR:64, huL:64, huR:64, bL:64, bR:64, uL:64, uR:64, delphi:64, s1:64, s2:64, hvL:64, hvR:64, vL:64, vR:64
@@ -258,7 +259,7 @@ MODULE SWE_PATCH_Solvers
         fw(:,1,2) = 0.d0
         fw(:,2,2) = 0.d0
         fw(:,3,2) = huR*vR - huL*vL -fw(:,3,1)-fw(:,3,3)
-	end subroutine
+    end subroutine
 	
 	subroutine riemann_augrie_simd(maxiter,hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,sE1,sE2,sw,fw)
         
@@ -280,27 +281,27 @@ MODULE SWE_PATCH_Solvers
 
         !input
         integer maxiter
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3,3), intent(inout) :: fw
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3), intent(inout) :: sw
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout) :: hL,hR,huL,huR,bL,bR,uL,uR,delphi,sE1,sE2
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout) :: hvL,hvR,vL,vR
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,3,3), intent(inout) :: fw
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,3), intent(inout) :: sw
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE), intent(inout) :: hL,hR,huL,huR,bL,bR,uL,uR,delphi,sE1,sE2
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE), intent(inout) :: hvL,hvR,vL,vR
 
         !local
         integer, parameter :: mwaves = 3, meqn = 3
         integer :: m,mw,k,iter, i
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3,3) :: A, r
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3) :: lambda, del, beta
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,3,3) :: A, r
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,3) :: lambda, del, beta
 
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: delh,delhu,delb,delnorm
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: rare1st,rare2st,sdelta,raremin,raremax
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: delh,delhu,delb,delnorm
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: rare1st,rare2st,sdelta,raremin,raremax
         real(kind = GRID_SR)                                            :: criticaltol,convergencetol,raretol
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: s1s2bar,s1s2tilde,hbar,hLstar,hRstar,hustar
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: huRstar,huLstar,uRstar,uLstar,hstarHLL
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: deldelh,deldelphi
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: s1m,s2m,hm
-        real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: det1,det2,det3,determinant
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: s1s2bar,s1s2tilde,hbar,hLstar,hRstar,hustar
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: huRstar,huLstar,uRstar,uLstar,hstarHLL
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: deldelh,deldelphi
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: s1m,s2m,hm
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: det1,det2,det3,determinant
 
-        logical, dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT) :: rare1,rare2,rarecorrector,rarecorrectortest,sonic
+        logical, dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: rare1,rare2,rarecorrector,rarecorrectortest,sonic
         
         !DIR$ ASSUME_ALIGNED fw:64, sw:64
         !DIR$ ASSUME_ALIGNED hL:64, hR:64, huL:64, huR:64, bL:64, bR:64, uL:64, uR:64, delphi:64, sE1:64,sE2:64
@@ -322,7 +323,7 @@ MODULE SWE_PATCH_Solvers
         delb = bR-bL
         delnorm = delh**2 + delphi**2
 
-        do i=1,_SWE_PATCH_NUM_EDGES
+        do i=1,_SWE_PATCH_SOLVER_CHUNK_SIZE
 #           if defined(_SINGLE_PRECISION)
                 call riemanntype_sp(hL(i), hR(i), uL(i), uR(i), hm(i), s1m(i), s2m(i), rare1(i), rare2(i), 1, cfg%dry_tolerance, g)
 #           elif defined(_DOUBLE_PRECISION)
@@ -529,26 +530,26 @@ MODULE SWE_PATCH_Solvers
     end subroutine
 	
 	subroutine compute_updates_hlle_simd(transform_matrices, hL, huL, hvL, bL, hR, huR, hvR, bR, upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR, maxWaveSpeed)
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,2,2),intent(in)	:: transform_matrices
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout)	:: hL, hR, huL, huR, hvL, hvR, bL, bR
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(out)	:: upd_hL, upd_hR, upd_huL, upd_huR, upd_hvL, upd_hvR
+		real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,2,2),intent(in)	:: transform_matrices
+		real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE), intent(inout)	:: hL, hR, huL, huR, hvL, hvR, bL, bR
+		real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE), intent(out)	:: upd_hL, upd_hR, upd_huL, upd_huR, upd_hvL, upd_hvR
 		real(kind = GRID_SR), intent(inout)									:: maxWaveSpeed
 		
 		!local
 		integer														:: i, j
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT)		:: uL, uR
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT)		:: sqrt_hL, sqrt_hR, sqrt_ghL, sqrt_ghR
+		real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE)		:: uL, uR
+		real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE)		:: sqrt_hL, sqrt_hR, sqrt_ghL, sqrt_ghR
 		real(kind = GRID_SR)										:: half_g, sqrt_g
-		integer(kind = BYTE), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT)		:: wetDryState
+		integer(kind = BYTE), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE)		:: wetDryState
 		
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,2)		:: characteristicSpeeds, roeSpeeds, extEinfeldtSpeeds, steadyStateWave
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT)		:: hRoe, uRoe, sqrt_g_hRoe, hLLMiddleHeight, inverseDiff
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3)		:: eigenValues, rightHandSide, beta
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3,3)	:: eigenVectors
+		real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,2)		:: characteristicSpeeds, roeSpeeds, extEinfeldtSpeeds, steadyStateWave
+		real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE)		:: hRoe, uRoe, sqrt_g_hRoe, hLLMiddleHeight, inverseDiff
+		real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,3)		:: eigenValues, rightHandSide, beta
+		real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,3,3)	:: eigenVectors
 		real(kind = GRID_SR), parameter								:: r_eps = 1e-7
 		
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,2,3)	:: fWaves
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,3)		:: waveSpeeds
+		real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,2,3)	:: fWaves
+		real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,3)		:: waveSpeeds
 		
 		enum, bind(c) !constants to classify wet-dry-state of pairs of cells
 			enumerator :: DryDry = 0
@@ -611,15 +612,6 @@ MODULE SWE_PATCH_Solvers
 		
 		!DIR$ ASSUME_ALIGNED fWaves: 64
 		!DIR$ ASSUME_ALIGNED waveSpeeds: 64
-
-		! TODO: clear this
-! 		associate(geom => SWE_PATCH_geometry)
-! 			! compute transformations matrices
-! 			do i=1,_SWE_PATCH_NUM_EDGES
-! 				transform_matrices(i,1,:) = normals(:,geom%edges_orientation(i))
-! 				transform_matrices(i,2,:) = [ - normals(2,geom%edges_orientation(i)), normals(1,geom%edges_orientation(i)) ]
-! 			end do
-! 		end associate
 
 		!samoa considers bathymetry included in h, the solver doesn't
 		hL = hL - bL
@@ -942,7 +934,7 @@ MODULE SWE_PATCH_Solvers
 		end where
 		
 		! compute maximum wave speed (-> CFL-condition)
-		maxWaveSpeed = maxVal(abs(waveSpeeds(1:_SWE_PATCH_NUM_EDGES,:)))
+        maxWaveSpeed = max(maxWaveSpeed, maxVal(abs(waveSpeeds(1:_SWE_PATCH_SOLVER_CHUNK_SIZE,:))))
 		
 		! inverse transformations
 		call apply_transformations_after(transform_matrices, upd_huL, upd_hvL)
@@ -950,37 +942,37 @@ MODULE SWE_PATCH_Solvers
 		
 	end subroutine
 	
-	! change base so hu/hv become ortogonal/perperdicular to edge
-	subroutine apply_transformations_before(transform_matrices, hu, hv)
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,2,2), intent(in)	:: transform_matrices
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout)		:: hu, hv			
-		
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT)					:: temp
-		!DIR$ ASSUME_ALIGNED transform_matrices: 64
-		!DIR$ ASSUME_ALIGNED hu: 64
-		!DIR$ ASSUME_ALIGNED hv: 64
-		!DIR$ ASSUME_ALIGNED temp: 64
-		
-		temp = hu
-		hu = transform_matrices(:,1,1) * hu + transform_matrices(:,1,2) * hv
-		hv = transform_matrices(:,2,1) * temp + transform_matrices(:,2,2) * hv
-	end subroutine
-	! transform back to original base
-	subroutine apply_transformations_after(transform_matrices, hu, hv)
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT,2,2), intent(in)	:: transform_matrices
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT), intent(inout)		:: hu, hv			
-		
-		real(kind = GRID_SR), dimension(_SWE_PATCH_NUM_EDGES_ALIGNMENT)					:: temp
-		!DIR$ ASSUME_ALIGNED transform_matrices: 64
-		!DIR$ ASSUME_ALIGNED hu: 64
-		!DIR$ ASSUME_ALIGNED hv: 64
-		!DIR$ ASSUME_ALIGNED temp: 64
-		
-		temp = hu
-		hu = transform_matrices(:,1,1) * hu + transform_matrices(:,2,1) * hv
-		hv = transform_matrices(:,1,2) * temp + transform_matrices(:,2,2) * hv
-	end subroutine	
-
+    ! change base so hu/hv become ortogonal/perperdicular to edge
+    subroutine apply_transformations_before(transform_matrices, hu, hv)
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,2,2), intent(in) :: transform_matrices
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE), intent(inout)      :: hu, hv           
+        
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE)                 :: temp
+        !DIR$ ASSUME_ALIGNED transform_matrices: 64
+        !DIR$ ASSUME_ALIGNED hu: 64
+        !DIR$ ASSUME_ALIGNED hv: 64
+        !DIR$ ASSUME_ALIGNED temp: 64
+        
+        temp = hu
+        hu = transform_matrices(:,1,1) * hu + transform_matrices(:,1,2) * hv
+        hv = transform_matrices(:,2,1) * temp + transform_matrices(:,2,2) * hv
+    end subroutine
+    ! transform back to original base
+    subroutine apply_transformations_after(transform_matrices, hu, hv)
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,2,2), intent(in) :: transform_matrices
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE), intent(inout)      :: hu, hv           
+        
+        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE)                 :: temp
+        !DIR$ ASSUME_ALIGNED transform_matrices: 64
+        !DIR$ ASSUME_ALIGNED hu: 64
+        !DIR$ ASSUME_ALIGNED hv: 64
+        !DIR$ ASSUME_ALIGNED temp: 64
+        
+        temp = hu
+        hu = transform_matrices(:,1,1) * hu + transform_matrices(:,2,1) * hv
+        hv = transform_matrices(:,1,2) * temp + transform_matrices(:,2,2) * hv
+    end subroutine  
+	
 END MODULE
 #endif
 

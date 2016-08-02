@@ -32,18 +32,22 @@
 
 #define _SWE_PATCH_ORDER_SQUARE		(_SWE_PATCH_ORDER*_SWE_PATCH_ORDER)
 #define _SWE_PATCH_NUM_EDGES			(3*_SWE_PATCH_ORDER*(_SWE_PATCH_ORDER+1)/2)
-! make sure of matrix alignment by rounding up the size of each column
-! these consider that vector width=512bit, should be updates for other architectures!
+
+! Number of Riemann Problems solver on each iteration of the SWE patch solvers.
+! --> See SWE/SWE_euler_timestep.f90 and SWE/SWE_patch_solvers.f90
+! Small numbers make sure that auxiliary arrays fit in the cache. 
+! This is specially important for the Xeon Phi, because of its smaller caches.
 #if defined(_SINGLE_PRECISION)
-#	define _VALUES_PER_VECTOR_INSTRUCTION 16
+#	define _SWE_PATCH_SOLVER_CHUNK_SIZE 16
 #elif defined(_DOUBLE_PRECISION) 
-#	define _VALUES_PER_VECTOR_INSTRUCTION 8
+#	define _SWE_PATCH_SOLVER_CHUNK_SIZE 8
 #elif defined(_QUAD_PRECISION) 
-#	define _VALUES_PER_VECTOR_INSTRUCTION 4
+#	define _SWE_PATCH_SOLVER_CHUNK_SIZE 4
 #else
-#	define _VALUES_PER_VECTOR_INSTRUCTION 1
+#	define _SWE_PATCH_SOLVER_CHUNK_SIZE 1
 #endif
-#define _SWE_PATCH_NUM_EDGES_ALIGNMENT ((_SWE_PATCH_NUM_EDGES + _VALUES_PER_VECTOR_INSTRUCTION - 1)/_VALUES_PER_VECTOR_INSTRUCTION*_VALUES_PER_VECTOR_INSTRUCTION)
+
+#define _SWE_PATCH_NUM_EDGES_ALIGNMENT ((_SWE_PATCH_NUM_EDGES + _SWE_PATCH_SOLVER_CHUNK_SIZE - 1)/_SWE_PATCH_SOLVER_CHUNK_SIZE*_SWE_PATCH_SOLVER_CHUNK_SIZE)
 
 #define _NUMA_ORDER 					0
 #define _NUMA_CELL_SIZE				((_NUMA_ORDER + 1) * (_NUMA_ORDER + 2)) / 2

@@ -354,7 +354,7 @@
 			type(num_cell_update), intent(inout)							:: update1, update2, update3
 		
 #			if defined (_SWE_PATCH)
-				integer 														:: i
+				integer 														:: i, last_index
 				type(num_cell_update)											:: tmp !> ghost cells in correct order 
 				type(t_update)													:: update_a, update_b
 				real(kind = GRID_SR)										    :: volume, edge_lengths(3), maxWaveSpeed, dQ_max_norm
@@ -362,7 +362,7 @@
 				real(kind = GRID_SR), DIMENSION(_SWE_PATCH_NUM_EDGES_ALIGNMENT)			:: hL, huL, hvL, bL
 				real(kind = GRID_SR), DIMENSION(_SWE_PATCH_NUM_EDGES_ALIGNMENT)			:: hR, huR, hvR, bR
 				real(kind = GRID_SR), DIMENSION(_SWE_PATCH_NUM_EDGES_ALIGNMENT)			:: upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR
-				real(kind = GRID_SR), DIMENSION(_SWE_PATCH_NUM_EDGES_ALIGNMENT,2,2)		:: transf
+				real(kind = GRID_SR), DIMENSION(_SWE_PATCH_SOLVER_CHUNK_SIZE,2,2)		:: transf
 
 #                               if !defined (_SWE_USE_PATCH_SOLVER)
 				    real(kind = GRID_SR), dimension(2,3)						:: normals
@@ -464,18 +464,20 @@
 					
 					! compute net_updates
 #					if defined (_SWE_USE_PATCH_SOLVER)
-						transf = geom%transform_matrices(:,:,:,element%cell%geometry%i_plotter_type)
-						!associate(transf => geom%transform_matrices(:,:,:,element%cell%geometry%i_plotter_type))
-#							if defined(_SWE_FWAVE) || defined(_SWE_AUG_RIEMANN)
-								call compute_updates_simd(transf, hL, huL, hvL, bL, hR, huR, hvR, bR, upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR, maxWaveSpeed)
-#							elif defined(_SWE_HLLE)
-								call compute_updates_hlle_simd(transf, hL, huL, hvL, bL, hR, huR, hvR, bR, upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR, maxWaveSpeed)
+                        maxWaveSpeed = 0.0_GRID_SR
+                        do i=1, _SWE_PATCH_NUM_EDGES, _SWE_PATCH_SOLVER_CHUNK_SIZE
+                            last_index = min(_SWE_PATCH_NUM_EDGES, i + _SWE_PATCH_SOLVER_CHUNK_SIZE - 1)
+                            transf = geom%transform_matrices(i:i+_SWE_PATCH_SOLVER_CHUNK_SIZE -1,:,:,element%cell%geometry%i_plotter_type)
+#                           if defined(_SWE_FWAVE) || defined(_SWE_AUG_RIEMANN)
+                                call compute_updates_simd(transf, hL(i:last_index), huL(i:last_index), hvL(i:last_index), bL(i:last_index), hR(i:last_index), huR(i:last_index), hvR(i:last_index), bR(i:last_index), upd_hL(i:last_index), upd_huL(i:last_index), upd_hvL(i:last_index), upd_hR(i:last_index), upd_huR(i:last_index), upd_hvR(i:last_index), maxWaveSpeed)
+#                           elif defined(_SWE_HLLE)
+                                call compute_updates_hlle_simd(transf, hL(i:last_index), huL(i:last_index), hvL(i:last_index), bL(i:last_index), hR(i:last_index), huR(i:last_index), hvR(i:last_index), bR(i:last_index), upd_hL(i:last_index), upd_huL(i:last_index), upd_hvL(i:last_index), upd_hR(i:last_index), upd_huR(i:last_index), upd_hvR(i:last_index), maxWaveSpeed)
 #							else
 								! this should never happen -> SCons rules should avoid this before compiling
 #								error "No valid SWE solver for patches/simd implementation has been defined!"
 								print *, 
-#							endif
-						!end associate
+#       					endif
+                        end do
 						section%u_max = max(section%u_max, maxWaveSpeed)
 #					else					
 					! using original geoclaw solver
