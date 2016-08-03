@@ -197,7 +197,7 @@ MODULE SWE_PATCH_Solvers
         end where
 
         ! compute maximum wave speed
-        maxWaveSpeed = max(maxWaveSpeed, maxVal(abs(waveSpeeds(1:_SWE_PATCH_SOLVER_CHUNK_SIZE,:))))
+        maxWaveSpeed = max(maxWaveSpeed, maxVal(abs(waveSpeeds(:,:))))
         
         
         ! inverse transformations
@@ -934,7 +934,7 @@ MODULE SWE_PATCH_Solvers
 		end where
 		
 		! compute maximum wave speed (-> CFL-condition)
-        maxWaveSpeed = max(maxWaveSpeed, maxVal(abs(waveSpeeds(1:_SWE_PATCH_SOLVER_CHUNK_SIZE,:))))
+        maxWaveSpeed = max(maxWaveSpeed, maxVal(abs(waveSpeeds(:,:))))
 		
 		! inverse transformations
 		call apply_transformations_after(transform_matrices, upd_huL, upd_hvL)
