@@ -404,6 +404,7 @@
                 dQ_H = 0.0_GRID_SR
                 dQ_HU = 0.0_GRID_SR
                 dQ_HV = 0.0_GRID_SR
+                maxWaveSpeed = 0.0_GRID_SR
                 volume = cfg%scaling * cfg%scaling * element%cell%geometry%get_volume() / (_SWE_PATCH_ORDER_SQUARE)
                 dt_div_volume = section%r_dt / volume
                 edge_lengths = cfg%scaling * element%cell%geometry%get_edge_sizes() / _SWE_PATCH_ORDER
@@ -480,12 +481,13 @@
                                 hvR(j) = update3%HV(geom%edges_b(ind) - _SWE_PATCH_ORDER_SQUARE - 2*_SWE_PATCH_ORDER)
                                 bR(j) = update3%B(geom%edges_b(ind) - _SWE_PATCH_ORDER_SQUARE - 2*_SWE_PATCH_ORDER)
                             end if
+                            
+                            !copy transformation matrices
+                            transf(j,:,:) = geom%transform_matrices(geom%edges_orientation(ind),:,:,element%cell%geometry%i_plotter_type)
                         end do
-                        
+
                         ! compute net_updates -> solve Riemann problems within chunk
 #   					if defined (_SWE_USE_PATCH_SOLVER)
-                            maxWaveSpeed = 0.0_GRID_SR
-                            transf = geom%transform_matrices(i:i+_SWE_PATCH_SOLVER_CHUNK_SIZE -1,:,:,element%cell%geometry%i_plotter_type)
 #                           if defined(_SWE_FWAVE) || defined(_SWE_AUG_RIEMANN)
                                 call compute_updates_simd(transf, hL, huL, hvL, bL, hR, huR, hvR, bR, upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR, maxWaveSpeed)
 #                           elif defined(_SWE_HLLE)
