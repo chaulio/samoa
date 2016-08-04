@@ -18,9 +18,9 @@ MODULE SWE_PATCH
 		
 		! arrays describing edges. 
 		! This means that triangles with ids edges_a[i] and edges_b[i] are neighbors, and edge number i is between them.
-		INTEGER*2, DIMENSION(_SWE_PATCH_NUM_EDGES) :: edges_a, edges_b
+		INTEGER, DIMENSION(_SWE_PATCH_NUM_EDGES) :: edges_a, edges_b
 		! Describes edge orientation: 1 = parallel to left leg, 2 = to hypotenuse, 3 = to right leg
-		INTEGER*1, DIMENSION(_SWE_PATCH_NUM_EDGES)	:: edges_orientation
+		INTEGER, DIMENSION(_SWE_PATCH_NUM_EDGES)	:: edges_orientation
 		
 		! coordinates of cells vertices, used for producing visual output.
 		REAL (kind = GRID_SR), DIMENSION(2,3,(_SWE_PATCH_ORDER*_SWE_PATCH_ORDER)) :: coords
@@ -30,7 +30,7 @@ MODULE SWE_PATCH
 		REAL (kind = GRID_SR), DIMENSION(3,2,2,-8:8) :: transform_matrices
 
 		! represents relationships between cells within a coarse patch and its two refined children
-		INTEGER*2, DIMENSION(_SWE_PATCH_ORDER_SQUARE,2) :: first_child, second_child
+		INTEGER, DIMENSION(_SWE_PATCH_ORDER_SQUARE,2) :: first_child, second_child
 
 		contains
 		
