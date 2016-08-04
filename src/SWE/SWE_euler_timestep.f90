@@ -346,8 +346,8 @@
 #			if defined (_SWE_PATCH)
 				integer 														:: i, j, ind
 				type(num_cell_update)											:: tmp !> ghost cells in correct order 
-				real(kind = GRID_SR)										    :: volume, edge_lengths(3), maxWaveSpeed, dQ_max_norm
-				type(num_cell_data_pers)													:: dQ !> deltaQ, used to compute cell updates
+				real(kind = GRID_SR)										    :: volume, edge_lengths(3), maxWaveSpeed, dQ_max_norm, dt_div_volume
+				real(kind = GRID_SR), DIMENSION(_SWE_PATCH_ORDER_SQUARE)                :: dQ_H, dQ_HU, dQ_HV !> deltaQ, used to compute cell updates
 				real(kind = GRID_SR), DIMENSION(_SWE_PATCH_SOLVER_CHUNK_SIZE)			:: hL, huL, hvL, bL
 				real(kind = GRID_SR), DIMENSION(_SWE_PATCH_SOLVER_CHUNK_SIZE)			:: hR, huR, hvR, bR
 				real(kind = GRID_SR), DIMENSION(_SWE_PATCH_SOLVER_CHUNK_SIZE)			:: upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR
@@ -401,10 +401,11 @@
 				end if
 				
 				! init some variables
-                dQ%H = 0.0_GRID_SR
-                dQ%HU = 0.0_GRID_SR
-                dQ%HV = 0.0_GRID_SR
+                dQ_H = 0.0_GRID_SR
+                dQ_HU = 0.0_GRID_SR
+                dQ_HV = 0.0_GRID_SR
                 volume = cfg%scaling * cfg%scaling * element%cell%geometry%get_volume() / (_SWE_PATCH_ORDER_SQUARE)
+                dt_div_volume = section%r_dt / volume
                 edge_lengths = cfg%scaling * element%cell%geometry%get_edge_sizes() / _SWE_PATCH_ORDER
 				
 				associate(data => element%cell%data_pers, geom => SWE_PATCH_geometry)
@@ -528,33 +529,31 @@
                                 exit
                             end if
                             
-                            !print *, i, j, ind, "->", geom%edges_a(ind), "/", geom%edges_b(ind), "--", upd_hL(j), "/", upd_hR(j)
-                        
                             if (geom%edges_a(ind) <= _SWE_PATCH_ORDER_SQUARE) then !ignore ghost cells
-                                dQ%H(geom%edges_a(ind)) = dQ%H(geom%edges_a(ind)) + upd_hL(j) * edge_lengths(geom%edges_orientation(ind))
-                                dQ%HU(geom%edges_a(ind)) = dQ%HU(geom%edges_a(ind)) + upd_huL(j) * edge_lengths(geom%edges_orientation(ind))
-                                dQ%HV(geom%edges_a(ind)) = dQ%HV(geom%edges_a(ind)) + upd_hvL(j) * edge_lengths(geom%edges_orientation(ind))
+                                dQ_H(geom%edges_a(ind)) = dQ_H(geom%edges_a(ind)) + upd_hL(j) * edge_lengths(geom%edges_orientation(ind))
+                                dQ_HU(geom%edges_a(ind)) = dQ_HU(geom%edges_a(ind)) + upd_huL(j) * edge_lengths(geom%edges_orientation(ind))
+                                dQ_HV(geom%edges_a(ind)) = dQ_HV(geom%edges_a(ind)) + upd_hvL(j) * edge_lengths(geom%edges_orientation(ind))
                             end if
                             if (geom%edges_b(ind) <= _SWE_PATCH_ORDER_SQUARE) then
-                                dQ%H(geom%edges_b(ind)) = dQ%H(geom%edges_b(ind)) + upd_hR(j) * edge_lengths(geom%edges_orientation(ind))
-                                dQ%HU(geom%edges_b(ind)) = dQ%HU(geom%edges_b(ind)) + upd_huR(j) * edge_lengths(geom%edges_orientation(ind))
-                                dQ%HV(geom%edges_b(ind)) = dQ%HV(geom%edges_b(ind)) + upd_hvR(j) * edge_lengths(geom%edges_orientation(ind))
+                                dQ_H(geom%edges_b(ind)) = dQ_H(geom%edges_b(ind)) + upd_hR(j) * edge_lengths(geom%edges_orientation(ind))
+                                dQ_HU(geom%edges_b(ind)) = dQ_HU(geom%edges_b(ind)) + upd_huR(j) * edge_lengths(geom%edges_orientation(ind))
+                                dQ_HV(geom%edges_b(ind)) = dQ_HV(geom%edges_b(ind)) + upd_hvR(j) * edge_lengths(geom%edges_orientation(ind))
                             end if
                         end do
 					end do 
 
 					! if land is flooded, init water height to dry tolerance and
 					! velocity to zero
-					where (data%H < data%B + cfg%dry_tolerance .and. data%H + dQ%H > data%B + cfg%dry_tolerance)
+					where (data%H < data%B + cfg%dry_tolerance .and. data%H + dQ_H > data%B + cfg%dry_tolerance)
 						data%H = data%B + cfg%dry_tolerance
 						data%HU = 0.0_GRID_SR
 						data%HV = 0.0_GRID_SR
 					end where
 
 					! update unknowns
-					data%H = data%H + dQ%H * (-section%r_dt / volume)
-					data%HU = data%HU + dQ%HU * (-section%r_dt / volume)
-					data%HV = data%HV + dQ%HV * (-section%r_dt / volume)
+					data%H = data%H + dQ_H * (-dt_div_volume)
+					data%HU = data%HU + dQ_HU * (-dt_div_volume)
+					data%HV = data%HV + dQ_HV * (-dt_div_volume)
 					
 					! if the water level falls below the dry tolerance, set water surface to 0 and velocity to 0
 					where (data%H < data%B + cfg%dry_tolerance) 
@@ -565,7 +564,7 @@
 					
 					!set refinement condition -> Here I am using the same ones as in the original no-patches implementation, but considering only the max value.
 					element%cell%geometry%refinement = 0
-					dQ_max_norm = maxval(dQ%HU*dQ%HU + dQ%HV*dQ%HV)
+					dQ_max_norm = maxval(dQ_HU*dQ_HU + dQ_HV*dQ_HV)
 
 					if (element%cell%geometry%i_depth < cfg%i_max_depth .and. dQ_max_norm > (cfg%scaling * 2.0_GRID_SR) ** 2) then
 						element%cell%geometry%refinement = 1
