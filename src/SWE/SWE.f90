@@ -201,10 +201,18 @@
 			type(t_grid_info)           	                            :: grid_info, grid_info_max
 			integer (kind = GRID_SI)                                    :: i_initial_step, i_time_step
 			integer  (kind = GRID_SI)                                   :: i_stats_phase
+			double precision                                            :: t_adapt=0, t_euler=0, t_init=0, t_output=0
+			
+			!$omp threadprivate(t_adapt, t_euler, t_init, t_output)
 
 			!init parameters
 			r_time_next_output = 0.0_GRID_SR
-
+			
+            t_init = 0
+            t_adapt = 0
+            t_euler = 0
+            t_output = 0
+            
             if (rank_MPI == 0) then
                 !$omp master
                 _log_write(0, *) "SWE: setting initial values and a priori refinement.."
@@ -219,7 +227,9 @@
 
 			do
 				!set numerics and check for refinement
+				t_init = t_init - get_wtime()
 				call swe%init%traverse(grid)
+				t_init = t_init + get_wtime()
 
                 grid_info%i_cells = grid%get_cells(MPI_SUM, .true.)
 
@@ -237,7 +247,9 @@
 					exit
 				endif
 
+                t_adapt = t_adapt - get_wtime()
 				call swe%adaption%traverse(grid)
+				t_adapt = t_adapt + get_wtime()
 
 				i_initial_step = i_initial_step + 1
 			end do
@@ -255,6 +267,7 @@
 
 			!output initial grid
 			if (cfg%r_output_time_step >= 0.0_GRID_SR) then
+                t_output = t_output - get_wtime()
                 if (cfg%l_ascii_output) then
                     call swe%ascii_output%traverse(grid)
                 end if
@@ -266,6 +279,7 @@
                 if (cfg%l_pointoutput) then
                     call swe%point_output%traverse(grid)
                 end if
+                t_output = t_output + get_wtime()
 
 				r_time_next_output = r_time_next_output + cfg%r_output_time_step
 			end if
@@ -273,7 +287,14 @@
 			!print initial stats
 			if (cfg%i_stats_phases >= 0) then
                 call update_stats(swe, grid)
-
+                !$omp master
+                    _log_write(0, '(" Wall time for each traversal:   Init: ", F0.4, "   Adapt: ", F0.4, "   Euler: ", F0.4, "   Output: ", F0.4 )') t_init, t_adapt, t_euler, t_output
+                    _log_write(0, *) ""
+                    t_init = 0
+                    t_adapt = 0
+                    t_euler = 0
+                    t_output = 0
+                !$omp end master
                 i_stats_phase = i_stats_phase + 1
 			end if
 
@@ -299,9 +320,14 @@
                     end if
 
                     !do an euler time step
+                    t_adapt = t_adapt - get_wtime()
                     call swe%adaption%traverse(grid)
+                    t_adapt = t_adapt + get_wtime()
 
+                    t_euler = t_euler - get_wtime()
                     call swe%euler%traverse(grid)
+                    t_euler = t_euler + get_wtime()
+                    
                     i_time_step = i_time_step + 1
 
                     !displace time-dependent bathymetry
@@ -321,6 +347,7 @@
 
                     !output grid
                     if (cfg%r_output_time_step >= 0.0_GRID_SR .and. grid%r_time >= r_time_next_output) then
+                        t_output = t_output - get_wtime()
                         if (cfg%l_ascii_output) then
                             call swe%ascii_output%traverse(grid)
                         end if
@@ -332,6 +359,7 @@
                         if (cfg%l_pointoutput) then
                             call swe%point_output%traverse(grid)
                         end if
+                        t_output = t_output + get_wtime()
 
                         r_time_next_output = r_time_next_output + cfg%r_output_time_step
                     end if
@@ -345,6 +373,14 @@
                 !print EQ phase stats
                 if (cfg%i_stats_phases >= 0) then
                     call update_stats(swe, grid)
+                    !$omp master
+                        _log_write(0, '(" Wall time for each traversal:   Init: ", F0.4, "   Adapt: ", F0.4, "   Euler: ", F0.4, "   Output: ", F0.4 )') t_init, t_adapt, t_euler, t_output
+                        _log_write(0, *) ""
+                        t_init = 0
+                        t_adapt = 0
+                        t_euler = 0
+                        t_output = 0
+                    !$omp end master
                 end if
 #           endif
 
@@ -355,10 +391,14 @@
 					exit
 				end if
 
+				t_adapt = t_adapt - get_wtime()
 				call swe%adaption%traverse(grid)
+				t_adapt = t_adapt + get_wtime()
 
 				!do a time step
+				t_euler = t_euler - get_wtime()
 				call swe%euler%traverse(grid)
+				t_euler = t_euler + get_wtime()
 				i_time_step = i_time_step + 1
 
 				grid_info%i_cells = grid%get_cells(MPI_SUM, .true.)
@@ -375,6 +415,7 @@
 
 				!output grid
 				if (cfg%r_output_time_step >= 0.0_GRID_SR .and. grid%r_time >= r_time_next_output) then
+                    t_output = t_output - get_wtime()
                     if (cfg%l_ascii_output) then
              	       call swe%ascii_output%traverse(grid)
                	    end if
@@ -386,6 +427,7 @@
                     if (cfg%l_pointoutput) then
                         call swe%point_output%traverse(grid)
                     end if
+                    t_output = t_output + get_wtime()
 
 					r_time_next_output = r_time_next_output + cfg%r_output_time_step
 				end if
@@ -395,7 +437,14 @@
                     (cfg%i_max_time_steps >= 0 .and. i_time_step * cfg%i_stats_phases >= i_stats_phase * cfg%i_max_time_steps)) then
 
                     call update_stats(swe, grid)
-
+                    !$omp master
+                        _log_write(0, '(" Wall time for each traversal:   Init: ", F0.4, "   Adapt: ", F0.4, "   Euler: ", F0.4, "   Output: ", F0.4 )') t_init, t_adapt, t_euler, t_output
+                        _log_write(0, *) ""
+                        t_init = 0
+                        t_adapt = 0
+                        t_euler = 0
+                        t_output = 0
+                    !$omp end master
                     i_stats_phase = i_stats_phase + 1
                 end if
 			end do
