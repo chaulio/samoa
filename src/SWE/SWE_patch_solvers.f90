@@ -293,7 +293,7 @@ MODULE SWE_PATCH_Solvers
         real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE,3) :: lambda, del, beta
 
         real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: delh,delhu,delb,delnorm
-        real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: rare1st,rare2st,sdelta,raremin,raremax
+        !real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: rare1st,rare2st,sdelta,raremin,raremax
         real(kind = GRID_SR)                                            :: criticaltol,convergencetol,raretol
         real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: s1s2bar,s1s2tilde,hbar,hLstar,hRstar,hustar
         real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: huRstar,huLstar,uRstar,uLstar,hstarHLL
@@ -301,20 +301,22 @@ MODULE SWE_PATCH_Solvers
         real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: s1m,s2m,hm
         real(kind = GRID_SR), dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: det1,det2,det3,determinant
 
-        logical, dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: rare1,rare2,rarecorrector,rarecorrectortest,sonic
+        logical, dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: rare1,rare2,sonic
+        !logical, dimension(_SWE_PATCH_SOLVER_CHUNK_SIZE) :: rarecorrector,rarecorrectortest
         
         !DIR$ ASSUME_ALIGNED fw:64, sw:64
         !DIR$ ASSUME_ALIGNED hL:64, hR:64, huL:64, huR:64, bL:64, bR:64, uL:64, uR:64, delphi:64, sE1:64,sE2:64
         !DIR$ ASSUME_ALIGNED hL:64, hvL:64, hvR:64, vL:64, vR:64
         !DIR$ ASSUME_ALIGNED A:64, r:64, lambda:64, del:64, beta:64
         !DIR$ ASSUME_ALIGNED delh:64, delhu:64, delb:64, delnorm:64
-        !DIR$ ASSUME_ALIGNED rare1st:64, rare2st:64, sdelta:64, raremin:64, raremax:64
+        !---DIR$ ASSUME_ALIGNED rare1st:64, rare2st:64, sdelta:64, raremin:64, raremax:64
         !DIR$ ASSUME_ALIGNED s1s2bar:64, s1s2tilde:64, hbar:64, hLstar:64, hRstar:64, hustar:64
         !DIR$ ASSUME_ALIGNED huRstar:64, huLstar:64, uRstar:64, uLstar:64, hstarHLL:64
         !DIR$ ASSUME_ALIGNED deldelh:64, deldelphi:64
         !DIR$ ASSUME_ALIGNED s1m:64, s2m:64, hm:64
         !DIR$ ASSUME_ALIGNED det1:64, det2:64, det3:64, determinant:64
-        !DIR$ ASSUME_ALIGNED rare1:64, rare2:64, rarecorrector:64, rarecorrectortest:64, sonic:64
+        !DIR$ ASSUME_ALIGNED rare1:64, rare2:64, sonic:64
+        !---DIR$ ASSUME_ALIGNED rarecorrector:64, rarecorrectortest:64
 
 
         !determine del vectors
@@ -338,31 +340,32 @@ MODULE SWE_PATCH_Solvers
         hstarHLL = max((huL-huR+sE2*hR-sE1*hL)/(sE2-sE1),0.0_GRID_SR) ! middle state in an HLL solve
 
         !determine the middle entropy corrector wave------------------------
-        rarecorrectortest=.false.
-        rarecorrector=.false.
-        where (rarecorrectortest) 
-            sdelta=lambda(:,3)-lambda(:,1)
-            raremin = 0.5_GRID_SR
-            raremax = 0.9_GRID_SR
-            where (rare1.and.sE1*s1m.lt.0.d0) raremin=0.2_GRID_SR
-            where (rare2.and.sE2*s2m.lt.0.d0) raremin=0.2_GRID_SR
-            where (rare1.or.rare2)
-                !see which rarefaction is larger
-                rare1st=3.0_GRID_SR*(sqrt(g*hL)-sqrt(g*hm))
-                rare2st=3.0_GRID_SR*(sqrt(g*hR)-sqrt(g*hm))
-                where (max(rare1st,rare2st).gt.raremin*sdelta .and. max(rare1st,rare2st).lt.raremax*sdelta)
-                    rarecorrector=.true.
-                where (rare1st.gt.rare2st)
-                    lambda(:,2)=s1m
-                elsewhere (rare2st.gt.rare1st)
-                    lambda(:,2)=s2m
-                elsewhere
-                    lambda(:,2)=0.5_GRID_SR*(s1m+s2m)
-                end where
-                end where
-            end where
-            where (hstarHLL.lt.min(hL,hR)*0.2_GRID_SR) rarecorrector=.false.
-        end where
+        ! commenting this because rarecorrectortest and rarecorrector are always false!
+!         rarecorrectortest=.false.
+!         rarecorrector=.false.
+!         where (rarecorrectortest) 
+!             sdelta=lambda(:,3)-lambda(:,1)
+!             raremin = 0.5_GRID_SR
+!             raremax = 0.9_GRID_SR
+!             where (rare1.and.sE1*s1m.lt.0.d0) raremin=0.2_GRID_SR
+!             where (rare2.and.sE2*s2m.lt.0.d0) raremin=0.2_GRID_SR
+!             where (rare1.or.rare2)
+!                 !see which rarefaction is larger
+!                 rare1st=3.0_GRID_SR*(sqrt(g*hL)-sqrt(g*hm))
+!                 rare2st=3.0_GRID_SR*(sqrt(g*hR)-sqrt(g*hm))
+!                 where (max(rare1st,rare2st).gt.raremin*sdelta .and. max(rare1st,rare2st).lt.raremax*sdelta)
+!                     rarecorrector=.true.
+!                 where (rare1st.gt.rare2st)
+!                     lambda(:,2)=s1m
+!                 elsewhere (rare2st.gt.rare1st)
+!                     lambda(:,2)=s2m
+!                 elsewhere
+!                     lambda(:,2)=0.5_GRID_SR*(s1m+s2m)
+!                 end where
+!                 end where
+!             end where
+!             where (hstarHLL.lt.min(hL,hR)*0.2_GRID_SR) rarecorrector=.false.
+!         end where
         
         where (abs(lambda(:,2)) .lt. 1.e-20_GRID_SR) lambda(:,2) = 0.0_GRID_SR
         
@@ -371,15 +374,16 @@ MODULE SWE_PATCH_Solvers
             r(:,2,mw)=lambda(:,mw)
             r(:,3,mw)=(lambda(:,mw))**2
         enddo
-        
-        where (.not.rarecorrector)
+
+        ! commenting this because rarecorrectortest and rarecorrector are always false!
+!         where (.not.rarecorrector)
             lambda(:,2) = 0.5_GRID_SR*(lambda(:,1)+lambda(:,3))
             lambda(:,2) = max(min(0.5_GRID_SR*(s1m+s2m),sE2),sE1)
             where (abs(lambda(:,2)) .lt. 1.d-20) lambda(:,2) = 0.0_GRID_SR
             r(:,1,2)=0.0_GRID_SR
             r(:,2,2)=0.0_GRID_SR
             r(:,3,2)=1.0_GRID_SR
-        end where
+!         end where
         !---------------------------------------------------
 
         !determine the steady state wave -------------------
@@ -399,21 +403,22 @@ MODULE SWE_PATCH_Solvers
         convergencetol=1.e-6_GRID_SR
         do iter=1,maxiter
             !determine steady state wave (this will be subtracted from the delta vectors)
-            where (min(hLstar,hRstar).lt.cfg%dry_tolerance.and.rarecorrector)
-                rarecorrector=.false.
-                hLstar=hL
-                hRstar=hR
-                uLstar=uL
-                uRstar=uR
-                huLstar=uLstar*hLstar
-                huRstar=uRstar*hRstar
-                lambda(:,2) = 0.5_GRID_SR*(lambda(:,1)+lambda(:,3))
-                lambda(:,2) = max(min(0.5_GRID_SR*(s1m+s2m),sE2),sE1)
-                where (abs(lambda(:,2)) .lt. 1.0_GRID_SR) lambda(:,2) = 0.0_GRID_SR
-                r(:,1,2)=0.0_GRID_SR
-                r(:,2,2)=0.0_GRID_SR
-                r(:,3,2)=1.0_GRID_SR
-            end where
+            ! commenting this because rarecorrectortest and rarecorrector are always false!
+!             where (min(hLstar,hRstar).lt.cfg%dry_tolerance.and.rarecorrector)
+!                 rarecorrector=.false.
+!                 hLstar=hL
+!                 hRstar=hR
+!                 uLstar=uL
+!                 uRstar=uR
+!                 huLstar=uLstar*hLstar
+!                 huRstar=uRstar*hRstar
+!                 lambda(:,2) = 0.5_GRID_SR*(lambda(:,1)+lambda(:,3))
+!                 lambda(:,2) = max(min(0.5_GRID_SR*(s1m+s2m),sE2),sE1)
+!                 where (abs(lambda(:,2)) .lt. 1.0_GRID_SR) lambda(:,2) = 0.0_GRID_SR
+!                 r(:,1,2)=0.0_GRID_SR
+!                 r(:,2,2)=0.0_GRID_SR
+!                 r(:,3,2)=1.0_GRID_SR
+!             end where
 
             hbar =  max(0.5_GRID_SR*(hLstar+hRstar),0.0_GRID_SR)
             s1s2bar = 0.25_GRID_SR*(uLstar+uRstar)**2 - g*hbar
