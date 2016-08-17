@@ -1601,7 +1601,7 @@ module SFC_edge_traversal
                                     update%H(:) = comm%p_local_edges(i_edge)%update%H(:)
                                     update%HU(:) = comm%p_local_edges(i_edge)%update%HU(:)
                                     update%HV(:) = comm%p_local_edges(i_edge)%update%HV(:)
-                                    update%HV(:) = comm%p_local_edges(i_edge)%update%B(:)
+                                    update%B(:) = comm%p_local_edges(i_edge)%update%B(:)
 #                               else
                                     update%flux(:) = comm%p_local_edges(i_edge)%update%flux(:)
 #                               endif
