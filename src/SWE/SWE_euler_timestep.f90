@@ -503,6 +503,11 @@
                             do j=1, _SWE_PATCH_SOLVER_CHUNK_SIZE
                                 ind = i + j - 1 ! actual index
                                 
+                                ! don't go outside array limits
+                                if (ind > _SWE_PATCH_NUM_EDGES) then
+                                    exit
+                                end if
+                                
                                 edges_a(j)%h = hL(j)
                                 edges_a(j)%p(1) = huL(j)
                                 edges_a(j)%p(2) = hvL(j)
@@ -571,7 +576,7 @@
 					if (element%cell%geometry%i_depth < cfg%i_max_depth .and. dQ_max_norm > (cfg%scaling * 2.0_GRID_SR) ** 2) then
 						element%cell%geometry%refinement = 1
 						traversal%i_refinements_issued = traversal%i_refinements_issued + 1_GRID_DI
-					else if (element%cell%geometry%i_depth > cfg%i_min_depth .and. dQ_max_norm < (cfg%scaling * 0.1_GRID_SR) ** 2) then
+					else if (element%cell%geometry%i_depth > cfg%i_min_depth .and. dQ_max_norm < (cfg%scaling * 1.0_GRID_SR) ** 2) then
 						element%cell%geometry%refinement = -1
 					endif
 
