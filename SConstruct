@@ -210,7 +210,7 @@ if env['openmp'] != 'noomp':
     env['F90FLAGS'] += ' -fopenmp'
     env['LINKFLAGS'] += ' -fopenmp'
 
-#set compilation flags and preprocessor macros for the ASAGI library
+#set compilation flags and preprocessor macros for the ASAGI libraryHE
 if env['asagi']:
   env.Append(F90PATH = os.path.abspath(env['asagi_dir'] + '/include'))
   env['F90FLAGS'] += ' -D_ASAGI'
@@ -233,24 +233,23 @@ if env['asagi_timing']:
     print "Error: asagi_timing must not be set if asagi is not active"
     Exit(-1)
 
-<<<<<<< HEAD
 #Choose a flux solver for the SWE scenario
 if env['flux_solver'] == 'upwind':
   env['F90FLAGS'] += ' -D_UPWIND_FLUX'
 elif env['flux_solver'] == 'lf':
-  env['F90FLAGS'] += ' -D_SWE_LF'
+  env['F90FLAGS'] += ' -D_LF_FLUX'
 elif env['flux_solver'] == 'lfbath':
-  env['F90FLAGS'] += ' -D_SWE_LF_BATH'
+  env['F90FLAGS'] += ' -D_LF_BATH_FLUX'
 elif env['flux_solver'] == 'llf':
-  env['F90FLAGS'] += ' -D_SWE_LLF'
+  env['F90FLAGS'] += ' -D_LLF_FLUX'
 elif env['flux_solver'] == 'llfbath':
-  env['F90FLAGS'] += ' -D_SWE_LLF_BATH'
+  env['F90FLAGS'] += ' -D_LLF_BATH_FLUX'
 elif env['flux_solver'] == 'fwave':
-  env['F90FLAGS'] += ' -D_SWE_FWAVE'
+  env['F90FLAGS'] += ' -D_FWAVE_FLUX'
 elif env['flux_solver'] == 'aug_riemann':
-  env['F90FLAGS'] += ' -D_SWE_AUG_RIEMANN'
+  env['F90FLAGS'] += ' -D_AUG_RIEMANN_FLUX'
 elif env['flux_solver'] == 'hlle':
-  env['F90FLAGS'] += ' -D_SWE_HLLE'
+  env['F90FLAGS'] += ' -D_HLLE_FLUX'
 
 #vectorization options for SWE scenario
 if env['no_vec']: 

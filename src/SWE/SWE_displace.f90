@@ -99,7 +99,7 @@
 				real (kind = GRID_SR), DIMENSION(2)								:: r_coords		!< cell coords within patch
 				integer (kind = GRID_SI)										:: j, row, col, cell_id
 #			else
-				real (kind = GRID_SR)		                                :: db
+				real (kind = GRID_SR)		                                :: db(_SWE_CELL_SIZE)
 #			endif
 
 			!evaluate initial function values at dof positions and compute DoFs
@@ -133,11 +133,9 @@
 					element%cell%data_pers%H = element%cell%data_pers%H + db
 					element%cell%data_pers%B = element%cell%data_pers%B + db
 #				else
-					do i = 1, _SWE_CELL_SIZE
-						db = -Q%b + get_bathymetry_at_element(section, element, section%r_time)
-						Q(i)%h = Q(i)%h + db
-						Q(i)%b = Q(i)%b + db
-					end do
+					db = -Q%b + get_bathymetry_at_element(section, element, section%r_time)
+					Q%h = Q(i)%h + db
+					Q%b = Q(i)%b + db
 #				endif
 #           endif
 

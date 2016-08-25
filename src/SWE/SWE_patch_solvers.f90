@@ -138,9 +138,9 @@ MODULE SWE_PATCH_Solvers
         !* call the solver *
         !*******************
 
-#       if defined(_SWE_FWAVE)
+#       if defined(_FWAVE_FLUX)
             call riemann_fwave_simd(hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,sE1,sE2,waveSpeeds,fWaves)
-#       elif defined(_SWE_AUG_RIEMANN)
+#       elif defined(_AUG_RIEMANN_FLUX)
             call riemann_augrie_simd(1,hL,hR,huL,huR,hvL,hvR,bL,bR,uL,uR,vL,vR,delphi,sE1,sE2,waveSpeeds,fWaves)
 #       endif
         !*****************
@@ -1035,7 +1035,6 @@ MODULE SWE_HLLE
         ! reset net updates
         net_updatesL = 0.0_GRID_SR
         net_updatesR = 0.0_GRID_SR
-        maxWaveSpeed = 0.0_GRID_SR
         
         ! declare variables which are used over and over again
         half_g = 0.5_GRID_SR * g

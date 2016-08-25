@@ -495,16 +495,15 @@
 
                         ! compute net_updates -> solve Riemann problems within chunk
 #   					if defined (_SWE_USE_PATCH_SOLVER)
-#                           if defined(_SWE_FWAVE) || defined(_SWE_AUG_RIEMANN)
+#                           if defined(_FWAVE_FLUX) || defined(_AUG_RIEMANN_FLUX)
                                 call compute_updates_simd(transf, hL, huL, hvL, bL, hR, huR, hvR, bR, upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR, maxWaveSpeed)
-#                           elif defined(_SWE_HLLE)
+#                           elif defined(_HLLE_FLUX)
                                 call compute_updates_hlle_simd(transf, hL, huL, hvL, bL, hR, huR, hvR, bR, upd_hL, upd_huL, upd_hvL, upd_hR, upd_huR, upd_hvR, maxWaveSpeed)
 #   				        else
                                 ! this should never happen -> SCons rules should avoid this before compiling
 #   							error "No valid SWE solver for patches/simd implementation has been defined!"
                                     print *, 
 #             				endif
-                            section%u_max = max(section%u_max, maxWaveSpeed)
 #   					else					
                             ! using original geoclaw solver
                             do j=1, _SWE_PATCH_SOLVER_CHUNK_SIZE
@@ -530,7 +529,6 @@
                                 upd_hR(j) = update_b%h
                                 upd_huR(j) = update_b%p(1)
                                 upd_hvR(j) = update_b%p(2)
-                                section%u_max = max(section%u_max, update_a%max_wave_speed)
                             end do
 #   					endif
 
@@ -586,6 +584,8 @@
 					else if (element%cell%geometry%i_depth > cfg%i_min_depth .and. dQ_max_norm < (cfg%scaling * 1.0_GRID_SR) ** 2) then
 						element%cell%geometry%refinement = -1
 					endif
+					
+					section%r_dt_new = min(section%r_dt_new, volume / dot_product(edge_lengths, max_wave_speed))
 
 				end associate
 #			else
@@ -594,7 +594,7 @@
 				type(t_state)   :: dQ(_SWE_CELL_SIZE)
 
 				call volume_op(element%cell%geometry, traversal%i_refinements_issued, element%cell%geometry%i_depth, &
-					element%cell%geometry%refinement, section%u_max, dQ, [update1%flux, update2%flux, update3%flux], section%r_dt)
+                element%cell%geometry%refinement, section%r_dt_new, dQ, [update1%flux, update2%flux, update3%flux], section%r_dt)
 
 				!if land is flooded, init water height to dry tolerance and velocity to 0
 				if (element%cell%data_pers%Q(1)%h < element%cell%data_pers%Q(1)%b + cfg%dry_tolerance .and. dQ(1)%h > 0.0_GRID_SR) then

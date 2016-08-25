@@ -72,7 +72,7 @@
 		!******************
 
 		subroutine element_op(traversal, section, element)
-			type(t_swe_init_traversal), intent(inout)				:: traversal
+			type(t_swe_init_b_traversal), intent(inout)				:: traversal
 			type(t_grid_section), intent(inout)						:: section
 			type(t_element_base), intent(inout)						:: element
 			

@@ -590,7 +590,7 @@ subroutine traverse_grids(traversal, src_grid, dest_grid)
 
     call thread_stats%stop_time(barrier_time)
     !$omp critical
-       time_test = time_test + thread_stats%r_computation_time 
+       !time_test = time_test + thread_stats%r_computation_time 
     !$omp end critical
 
     call thread_stats%stop_time(traversal_time)

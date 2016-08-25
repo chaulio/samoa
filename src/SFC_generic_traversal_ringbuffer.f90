@@ -452,7 +452,7 @@ subroutine traverse(traversal, grid)
     grid%threads%elements(i_thread)%stats = grid%threads%elements(i_thread)%stats + thread_stats
     
     !$omp single
-        time_test = time_test + sum(traversal%children(:)%stats%r_computation_time) ! thread_traversal%stats%r_traversal_time - thread_traversal%stats%r_sync_time 
+        !time_test = time_test + sum(traversal%children(:)%stats%r_computation_time) ! thread_traversal%stats%r_traversal_time - thread_traversal%stats%r_sync_time 
     !$omp end single
 end subroutine
 
