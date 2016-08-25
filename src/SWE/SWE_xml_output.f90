@@ -42,7 +42,7 @@
         type num_traversal_data
             type(t_output_point_data), allocatable		            :: point_data(:)
             type(t_output_cell_data), allocatable			        :: cell_data(:)
-            character(len=64)							            :: s_file_stamp
+            character(len=256)							            :: s_file_stamp
 
             integer (kind = GRID_SI)								:: i_output_iteration = 0
             integer (kind = GRID_SI)								:: i_point_data_index
@@ -76,15 +76,15 @@
                 _log_write(1, '(A, I0)') " SWE: output step: ", traversal%i_output_iteration
             end if
 
-            call scatter(traversal%s_file_stamp, traversal%children%s_file_stamp)
-            call scatter(traversal%i_output_iteration, traversal%children%i_output_iteration)
+            call scatter(traversal%s_file_stamp, traversal%sections%s_file_stamp)
+            call scatter(traversal%i_output_iteration, traversal%sections%i_output_iteration)
 		end subroutine
 
         subroutine post_traversal_grid_op(traversal, grid)
 			type(t_swe_xml_output_traversal), intent(inout)				:: traversal
 			type(t_grid), intent(inout)							        :: grid
 
-            character (len = 64)							:: s_file_name
+            character (len = 256)							:: s_file_name
             integer                                         :: i_error
 			integer(4)										:: i_rank, i_section, e_io
 			logical                                         :: l_exists
@@ -101,11 +101,15 @@
                     write (s_file_name, "(A, A, I0, A)") TRIM(traversal%s_file_stamp), "_", traversal%i_output_iteration, ".pvtu"
                     e_io = vtk%VTK_INI_XML('ascii', s_file_name, 'PUnstructuredGrid')
 
+                    e_io = vtk%VTK_DAT_XML('pfield', 'OPEN')
+                        e_io = vtk%VTK_VAR_XML('time', 1.0_GRID_SR, 1)
+                    e_io = vtk%VTK_DAT_XML('pfield', 'CLOSE')
+
                     e_io = vtk%VTK_DAT_XML('pnode', 'OPEN')
                         if (i_element_order > 0) then
                             e_io = vtk%VTK_VAR_XML('water height', 1.0_GRID_SR, 1)
                             e_io = vtk%VTK_VAR_XML('bathymetry', 1.0_GRID_SR, 1)
-                            e_io = vtk%VTK_VAR_XML('velocity', 1.0_GRID_SR, 3)
+                            e_io = vtk%VTK_VAR_XML('momentum', 1.0_GRID_SR, 3)
                         end if
                     e_io = vtk%VTK_DAT_XML('pnode', 'CLOSE')
 
@@ -113,7 +117,7 @@
                         if (i_element_order == 0) then
                             e_io = vtk%VTK_VAR_XML('water height', 1.0_GRID_SR, 1)
                             e_io = vtk%VTK_VAR_XML('bathymetry', 1.0_GRID_SR, 1)
-                            e_io = vtk%VTK_VAR_XML('velocity', 1.0_GRID_SR, 3)
+                            e_io = vtk%VTK_VAR_XML('momentum', 1.0_GRID_SR, 3)
                         end if
 
                         e_io = vtk%VTK_VAR_XML('rank', 1_GRID_SI, 1)
@@ -182,13 +186,13 @@
 			integer (kind = GRID_SI), dimension(:), allocatable			:: i_offsets
 			integer (1), dimension(:), allocatable						:: i_types
 			integer (kind = GRID_SI), dimension(:), allocatable			:: i_connectivity
-			real (kind = GRID_SR), dimension(:, :), allocatable			:: r_velocity
 			real (kind = GRID_SR), dimension(:), allocatable			:: r_empty
             type(t_vtk_writer)                                          :: vtk
 
 			type(t_section_info)                                        :: grid_info
 			integer (kind = GRID_SI)									:: i_error, i_cells, i_points, i
 			integer(4)													:: e_io
+            character (len = 256)							            :: s_file_name
 
             grid_info = section%get_info()
 #if defined (_SWE_PATCH)
@@ -207,7 +211,6 @@
 
 			allocate(i_offsets(i_cells), stat = i_error); assert_eq(i_error, 0)
 			allocate(i_types(i_cells), stat = i_error); assert_eq(i_error, 0)
-			allocate(r_velocity(2, max(i_cells, i_points)), stat = i_error); assert_eq(i_error, 0)
 			allocate(r_empty(max(i_cells, i_points)), stat = i_error); assert_eq(i_error, 0)
 
 			r_empty = 0.0_GRID_SR
@@ -228,12 +231,16 @@
 				end forall
 			end if
 
-			write (traversal%s_file_stamp, "(A, A, I0, A, I0, A, I0, A)") TRIM(traversal%s_file_stamp), "_", traversal%i_output_iteration, "_r", rank_MPI, "_s", section%index, ".vtu"
+			write (s_file_name, "(A, A, I0, A, I0, A, I0, A)") trim(traversal%s_file_stamp), "_", traversal%i_output_iteration, "_r", rank_MPI, "_s", section%index, ".vtu"
 
 #           if defined(_QUAD_PRECISION)
 #               warning VTK output does not work for quad precision
 #           else
-                e_io = vtk%VTK_INI_XML('binary', traversal%s_file_stamp, 'UnstructuredGrid')
+                e_io = vtk%VTK_INI_XML('binary', s_file_name, 'UnstructuredGrid')
+                    e_io = vtk%VTK_DAT_XML('field', 'OPEN')
+                        e_io = vtk%VTK_VAR_XML(1, 'time', [section%r_time])
+                    e_io = vtk%VTK_DAT_XML('field', 'CLOSE')
+
                     e_io = vtk%VTK_GEO_XML(i_points, i_cells, traversal%point_data%coords(1), traversal%point_data%coords(2), r_empty(1:i_points))
 
                     e_io = vtk%VTK_CON_XML(i_cells, i_connectivity, i_offsets, i_types)
@@ -242,10 +249,7 @@
                         if (i_element_order > 0) then
                             e_io = vtk%VTK_VAR_XML(i_points, 'water height', traversal%point_data%Q%h)
                             e_io = vtk%VTK_VAR_XML(i_points, 'bathymetry', traversal%point_data%Q%b)
-
-                            r_velocity(1, 1:i_points) = traversal%point_data%Q%p(1) / max(cfg%dry_tolerance, traversal%point_data%Q%h - traversal%point_data%Q%b)
-                            r_velocity(2, 1:i_points) = traversal%point_data%Q%p(2) / max(cfg%dry_tolerance, traversal%point_data%Q%h - traversal%point_data%Q%b)
-                            e_io = vtk%VTK_VAR_XML(i_points, 'velocity',  r_velocity(1, 1:i_points), r_velocity(2, 1:i_points), r_empty(1:i_points))
+                            e_io = vtk%VTK_VAR_XML(i_points, 'momentum',  traversal%point_data%Q%p(1), traversal%point_data%Q%p(2), r_empty(1:i_points))
                         end if
                     e_io = vtk%VTK_DAT_XML('node', 'CLOSE')
 
@@ -253,10 +257,7 @@
                         if (i_element_order == 0) then
                             e_io = vtk%VTK_VAR_XML(i_cells, 'water height', traversal%cell_data%Q%h)
                             e_io = vtk%VTK_VAR_XML(i_cells, 'bathymetry', traversal%cell_data%Q%b)
-
-                            r_velocity(1, 1:i_cells) = traversal%cell_data%Q%p(1) / max(cfg%dry_tolerance, traversal%cell_data%Q%h - traversal%cell_data%Q%b)
-                            r_velocity(2, 1:i_cells) = traversal%cell_data%Q%p(2) / max(cfg%dry_tolerance, traversal%cell_data%Q%h - traversal%cell_data%Q%b)
-                            e_io = vtk%VTK_VAR_XML(i_cells, 'velocity', r_velocity(1, 1:i_cells), r_velocity(2, 1:i_cells), r_empty(1:i_cells))
+                            e_io = vtk%VTK_VAR_XML(i_cells, 'momentum', traversal%cell_data%Q%p(1), traversal%cell_data%Q%p(2), r_empty(1:i_cells))
                         end if
 
                         e_io = vtk%VTK_VAR_XML(i_cells, 'rank', traversal%cell_data%rank)
@@ -276,7 +277,6 @@
 			deallocate(i_offsets, stat = i_error); assert_eq(i_error, 0)
 			deallocate(i_types, stat = i_error); assert_eq(i_error, 0)
 			deallocate(i_connectivity, stat = i_error); assert_eq(i_error, 0)
-			deallocate(r_velocity, stat = i_error); assert_eq(i_error, 0)
 			deallocate(r_empty, stat = i_error); assert_eq(i_error, 0)
 
 			deallocate(traversal%cell_data, stat = i_error); assert_eq(i_error, 0)
@@ -298,7 +298,8 @@
 			!local variables
 
 			integer (kind = GRID_SI)							:: i
-			real (kind = GRID_SR), parameter, dimension(2, 6)	:: r_test_points = reshape([1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.5, 0.5, 0.0, 0.5, 0.5 ], [2, 6 ])
+			real (kind = GRID_SR), parameter, dimension(2, 6)	:: r_test_points_forward = reshape([1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.5, 0.5, 0.0, 0.5, 0.5 ], [2, 6 ])
+			real (kind = GRID_SR), parameter, dimension(2, 6)	:: r_test_points_backward = reshape([0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.5, 0.0, 0.0, 0.5, 0.5, 0.5 ], [2, 6 ])
 			real (kind = GRID_SR), parameter, dimension(2)		:: r_test_point0 = [1.0_GRID_SR/3.0_GRID_SR, 1.0_GRID_SR/3.0_GRID_SR]
 #			if defined(_SWE_PATCH)
 				type(t_state), dimension(_SWE_PATCH_ORDER_SQUARE):: Q
@@ -345,7 +346,6 @@
 
 #			else
 				type(t_state), dimension(_SWE_CELL_SIZE)			:: Q
-
 				type(t_state), dimension(6)							:: Q_test
 
 				call gv_Q%read(element, Q)
@@ -358,31 +358,43 @@
 
 				select case (i_element_order)
 					case (2)
-						forall (i = 1 : 6)
-							traversal%point_data(traversal%i_point_data_index + i - 1)%coords = cfg%scaling * samoa_barycentric_to_world_point(element%transform_data, r_test_points(:, i)) + cfg%offset
-							traversal%point_data(traversal%i_point_data_index + i - 1)%Q%h = t_basis_Q_eval(r_test_points(:, i), Q%h)
-							traversal%point_data(traversal%i_point_data_index + i - 1)%Q%b = t_basis_Q_eval(r_test_points(:, i), Q%b)
-							traversal%point_data(traversal%i_point_data_index + i - 1)%Q%p(1) = t_basis_Q_eval(r_test_points(:, i), Q%p(1))
-							traversal%point_data(traversal%i_point_data_index + i - 1)%Q%p(2) = t_basis_Q_eval(r_test_points(:, i), Q%p(2))
-						end forall
+                        if (element%transform_data%plotter_data%orientation > 0) then
+                            forall (i = 1 : 6)
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%coords = cfg%scaling * samoa_barycentric_to_world_point(element%transform_data, r_test_points_forward(:, i)) + cfg%offset
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%Q%h = t_basis_Q_eval(r_test_points_forward(:, i), Q%h)
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%Q%b = t_basis_Q_eval(r_test_points_forward(:, i), Q%b)
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%Q%p(1) = t_basis_Q_eval(r_test_points_forward(:, i), Q%p(1))
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%Q%p(2) = t_basis_Q_eval(r_test_points_forward(:, i), Q%p(2))
+                            end forall
+                        else
+                            forall (i = 1 : 6)
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%coords = cfg%scaling * samoa_barycentric_to_world_point(element%transform_data, r_test_points_backward(:, i)) + cfg%offset
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%Q%h = t_basis_Q_eval(r_test_points_backward(:, i), Q%h)
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%Q%b = t_basis_Q_eval(r_test_points_backward(:, i), Q%b)
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%Q%p(1) = t_basis_Q_eval(r_test_points_backward(:, i), Q%p(1))
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%Q%p(2) = t_basis_Q_eval(r_test_points_backward(:, i), Q%p(2))
+                            end forall
+                        end if
 
 						traversal%i_point_data_index = traversal%i_point_data_index + 6
 					case (1)
-						forall (i = 1 : 3)
-							traversal%point_data(traversal%i_point_data_index + i - 1)%coords = cfg%scaling * samoa_barycentric_to_world_point(element%transform_data, r_test_points(:, i)) + cfg%offset
-							traversal%point_data(traversal%i_point_data_index + i - 1)%Q%h = t_basis_Q_eval(r_test_points(:, i), Q%h)
-							traversal%point_data(traversal%i_point_data_index + i - 1)%Q%b = t_basis_Q_eval(r_test_points(:, i), Q%b)
-							traversal%point_data(traversal%i_point_data_index + i - 1)%Q%p(1) = t_basis_Q_eval(r_test_points(:, i), Q%p(1))
-							traversal%point_data(traversal%i_point_data_index + i - 1)%Q%p(2) = t_basis_Q_eval(r_test_points(:, i), Q%p(2))
-						end forall
-
-						traversal%i_point_data_index = traversal%i_point_data_index + 3
-					case (0)
-						forall (i = 1 : 3)
-							traversal%point_data(traversal%i_point_data_index + i - 1)%coords = cfg%scaling * samoa_barycentric_to_world_point(element%transform_data, r_test_points(:, i)) + cfg%offset
-						end forall
-						
-						
+                        if (element%transform_data%plotter_data%orientation > 0) then
+                            forall (i = 1 : 3)
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%coords = cfg%scaling * samoa_barycentric_to_world_point(element%transform_data, r_test_points_forward(:, i)) + cfg%offset
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%Q%h = t_basis_Q_eval(r_test_points_forward(:, i), Q%h)
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%Q%b = t_basis_Q_eval(r_test_points_forward(:, i), Q%b)
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%Q%p(1) = t_basis_Q_eval(r_test_points_forward(:, i), Q%p(1))
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%Q%p(2) = t_basis_Q_eval(r_test_points_forward(:, i), Q%p(2))
+                            end forall
+                        else
+                            forall (i = 1 : 3)
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%coords = cfg%scaling * samoa_barycentric_to_world_point(element%transform_data, r_test_points_backward(:, i)) + cfg%offset
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%Q%h = t_basis_Q_eval(r_test_points_backward(:, i), Q%h)
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%Q%b = t_basis_Q_eval(r_test_points_backward(:, i), Q%b)
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%Q%p(1) = t_basis_Q_eval(r_test_points_backward(:, i), Q%p(1))
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%Q%p(2) = t_basis_Q_eval(r_test_points_backward(:, i), Q%p(2))
+                            end forall
+                        end if
 
 						traversal%i_point_data_index = traversal%i_point_data_index + 3
 
@@ -390,6 +402,24 @@
 						traversal%cell_data(traversal%i_cell_data_index)%Q%b = t_basis_Q_eval(r_test_point0, Q%b)
 						traversal%cell_data(traversal%i_cell_data_index)%Q%p(1) = t_basis_Q_eval(r_test_point0, Q%p(1))
 						traversal%cell_data(traversal%i_cell_data_index)%Q%p(2) = t_basis_Q_eval(r_test_point0, Q%p(2))
+						
+                    case (0)
+                        if (element%transform_data%plotter_data%orientation > 0) then
+                            forall (i = 1 : 3)
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%coords = cfg%scaling * samoa_barycentric_to_world_point(element%transform_data, r_test_points_forward(:, i)) + cfg%offset
+                            end forall
+                        else
+                            forall (i = 1 : 3)
+                                traversal%point_data(traversal%i_point_data_index + i - 1)%coords = cfg%scaling * samoa_barycentric_to_world_point(element%transform_data, r_test_points_backward(:, i)) + cfg%offset
+                            end forall
+                        end if
+
+                        traversal%i_point_data_index = traversal%i_point_data_index + 3
+
+                        traversal%cell_data(traversal%i_cell_data_index)%Q%h = t_basis_Q_eval(r_test_point0, Q%h)
+                        traversal%cell_data(traversal%i_cell_data_index)%Q%b = t_basis_Q_eval(r_test_point0, Q%b)
+                        traversal%cell_data(traversal%i_cell_data_index)%Q%p(1) = t_basis_Q_eval(r_test_point0, Q%p(1))
+                        traversal%cell_data(traversal%i_cell_data_index)%Q%p(2) = t_basis_Q_eval(r_test_point0, Q%p(2))
 				end select
 
 				traversal%i_cell_data_index = traversal%i_cell_data_index + 1
